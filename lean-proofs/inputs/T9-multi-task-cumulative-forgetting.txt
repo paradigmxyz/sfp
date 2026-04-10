@@ -1,0 +1,65 @@
+# Theorem T9: Multi-Task Cumulative Forgetting
+
+## Definitions
+
+Consider sequential fine-tuning on K tasks T_1, T_2, ..., T_K.
+
+Let θ_0 be the initial pre-trained parameters. After fine-tuning on task T_k, the parameters are θ_k.
+
+For each task transition k → k+1:
+  δ_k = Σ_ℓ ‖P_{W_ℓ^{(k)}}(a_ℓ(θ_{k+1}) - a_ℓ(θ_k))‖²    (drift on task k's subspace)
+  C_k = forgetting constant for task k (from T1)
+
+The forgetting of task k at the end of all K tasks:
+  F_k(θ_K) = |L_k(θ_K) - L_k(θ_k)|     (loss on task k after all subsequent fine-tuning)
+
+The **total cumulative forgetting**:
+  F_total = Σ_{k=1}^{K-1} F_k(θ_K)
+
+Assume:
+  (A1) Each task's H1 holds with constant C_k and subspace W_ℓ^{(k)}
+  (A2) SFP is applied at each task boundary with preservation loss targeting task k's subspace
+  (A3) Subspaces across tasks may overlap: define overlap as O_{jk} = ‖P_{W^{(j)}} P_{W^{(k)}}‖_F² / r
+
+## Claims
+
+1. **Single-task forgetting bound (telescoping).** The forgetting of task k after fine-tuning on tasks k+1, ..., K is:
+     F_k(θ_K) ≤ Σ_{j=k+1}^K C_k · √δ_k^{(j)}
+
+   where δ_k^{(j)} = Σ_ℓ ‖P_{W_ℓ^{(k)}}(a_ℓ(θ_j) - a_ℓ(θ_{j-1}))‖² is the drift of task k's subspace during task j's fine-tuning.
+
+   Prove via: triangle inequality applied to the telescoping sum:
+     a_ℓ(θ_K) - a_ℓ(θ_k) = Σ_{j=k+1}^K [a_ℓ(θ_j) - a_ℓ(θ_{j-1})]
+
+2. **Total cumulative forgetting bound.** Summing over all prior tasks:
+     F_total ≤ Σ_{k=1}^{K-1} Σ_{j=k+1}^K C_k · √δ_k^{(j)}
+
+   In matrix form: F_total ≤ 1^T · D · c, where D_{kj} = √δ_k^{(j)} and c_k = C_k.
+
+   Upper bound via Cauchy-Schwarz on each inner sum:
+     F_total ≤ Σ_{k=1}^{K-1} C_k · √((K-k) · Σ_{j=k+1}^K δ_k^{(j)})
+
+3. **Subspace overlap effect.** When task j's fine-tuning is performed with SFP preserving task j-1's subspace W^{(j-1)}, the drift of task k's subspace (k < j-1) during task j is:
+     δ_k^{(j)} ≤ δ_{j-1}^{(j)} · (1 - O_{k,j-1}) + ε_k^{(j)}
+
+   where O_{k,j-1} = ‖P_{W^{(k)}} P_{W^{(j-1)}}‖_F² / r is the overlap between task k and task j-1 subspaces, and ε is a residual term.
+
+   Intuition: SFP for task j-1 partially protects task k to the extent their subspaces overlap.
+
+4. **Optimal task ordering.** Among all permutations π of {1, ..., K}, the total forgetting bound F_total(π) is minimized by ordering tasks to minimize:
+     Σ_{k=1}^{K-1} C_{π(k)} · (K - k)
+
+   This is a weighted scheduling problem. The optimal order sorts tasks by C_k in decreasing order: fine-tune on the task with highest forgetting constant first (it will have the most subsequent fine-tuning steps to accumulate drift).
+
+   Prove via: exchange argument — swapping two adjacent tasks with C_i < C_j (putting j first) reduces the bound.
+
+5. **Linear accumulation vs square-root.** Compare two regimes:
+   - Without SFP: F_total = O(K · max_k C_k) — linear in number of tasks
+   - With SFP: F_total = O(√K · max_k C_k · √δ_max) — √K scaling if per-task drift δ is controlled
+
+   Prove: with SFP controlling each δ_k^{(j)} ≤ δ_max, the sum has K(K-1)/2 terms each bounded by C_max · √δ_max. But with optimal ordering and subspace overlap, this reduces to O(√K) effective tasks.
+
+6. **Numerical example.** With K = 5 sequential tasks, C_k ∈ {0.5, 0.8, 1.2, 0.3, 0.7}, δ_max = 0.01:
+   a) Worst-case ordering (ascending C): F_total ≤ 1.2·4·0.1 + 0.8·3·0.1 + 0.7·2·0.1 + 0.5·1·0.1 + 0.3·0 = 0.48 + 0.24 + 0.14 + 0.05 = 0.91
+   b) Optimal ordering (descending C): F_total ≤ 0.3·4·0.1 + 0.5·3·0.1 + 0.7·2·0.1 + 0.8·1·0.1 + 1.2·0 = 0.12 + 0.15 + 0.14 + 0.08 = 0.49
+   c) Improvement: 46% reduction in forgetting bound from optimal ordering

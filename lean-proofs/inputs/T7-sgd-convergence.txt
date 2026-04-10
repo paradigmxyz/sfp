@@ -1,0 +1,78 @@
+# Theorem T7: SGD Convergence Under SFP Regularization
+
+## Definitions
+
+Consider minimizing the composite objective:
+  L(θ) = L_new(θ) + λ · L_pres(θ)
+
+where:
+  L_new(θ) — new-task loss, assumed L-smooth and μ-strongly convex (μ > 0)
+  L_pres(θ) = Σ_ℓ ‖P_{W_ℓ}(a_ℓ(θ) - a_ℓ(θ_0))‖² — SFP preservation loss
+  λ > 0 — regularization strength
+
+**Smoothness:** L_new is L-smooth if ‖∇L_new(θ) - ∇L_new(θ')‖ ≤ L · ‖θ - θ'‖ for all θ, θ'.
+
+**Strong convexity:** L_new is μ-strongly convex if L_new(θ') ≥ L_new(θ) + ⟨∇L_new(θ), θ'-θ⟩ + (μ/2)‖θ'-θ‖² for all θ, θ'.
+
+Let θ* = argmin L_new(θ) be the unconstrained minimizer of the new-task loss.
+
+Define:
+  δ(θ) = Σ_ℓ ‖P_{W_ℓ}(a_ℓ(θ) - a_ℓ(θ_0))‖²    (subspace drift = L_pres(θ))
+  δ_k = δ(θ_k)                                      (drift at step k)
+  θ_k — parameters after k gradient steps
+
+SGD update:
+  θ_{k+1} = θ_k - η · ∇L(θ_k) = θ_k - η · (∇L_new(θ_k) + λ · ∇L_pres(θ_k))
+
+Assume:
+  (A1) L_new is L-smooth and μ-strongly convex with condition number κ = L/μ
+  (A2) L_pres is L_p-smooth (activations have bounded second derivatives)
+  (A3) Step size η ≤ 1/(L + λ·L_p)  (ensures descent)
+
+## Claims
+
+1. **Descent lemma for composite objective.** Under (A1)-(A3), for each step:
+     L(θ_{k+1}) ≤ L(θ_k) - (η/2) · ‖∇L(θ_k)‖²
+
+   Prove via: L-smoothness of L = L_new + λ·L_pres with constant L + λ·L_p, and the step size condition.
+
+2. **Linear convergence of new-task loss.** After K steps of gradient descent with η = 1/(L + λ·L_p):
+     L_new(θ_K) - L_new(θ*) ≤ (1 - μ/(L + λ·L_p))^K · (L_new(θ_0) - L_new(θ*)) + λ · δ_max / μ
+
+   where δ_max = max_k δ_k is the maximum drift encountered.
+
+   The first term is the standard linear convergence with an effective condition number κ_eff = (L + λ·L_p)/μ. The second term is the bias introduced by SFP regularization.
+
+3. **Drift bound after K steps.** The subspace drift satisfies:
+     δ_K ≤ (1 - ημ)^K · δ_0 + (ηλ/μ) · ‖∇L_pres‖²_max
+
+   where ‖∇L_pres‖²_max = max_k ‖∇L_pres(θ_k)‖².
+
+   When starting from θ_0 (so δ_0 = 0):
+     δ_K ≤ (ηλ/μ) · ‖∇L_pres‖²_max · (1 - (1-ημ)^K)
+
+   For large K: δ_∞ ≤ (ηλ/μ) · ‖∇L_pres‖²_max.
+
+4. **Minimum steps for target drift.** To achieve δ_K ≤ δ_target starting from δ_0 = 0:
+     K ≥ (1/(ημ)) · log(1 / (1 - μ·δ_target / (λ·‖∇L_pres‖²_max)))
+
+   When δ_target is small relative to the steady-state drift:
+     K ≈ (1/(ημ)) · (μ · δ_target) / (λ · ‖∇L_pres‖²_max)
+
+5. **Pareto frontier: new-task loss vs forgetting.** The achievable (L_new, forgetting) pairs form a Pareto frontier parameterized by λ:
+     forgetting(λ) ≤ C · √(δ_∞(λ)) = C · √(ηλ · ‖∇L_pres‖²_max / μ)
+     L_new(λ) ≈ L_new(θ*) + λ · δ_∞(λ) / μ
+
+   Eliminating λ:
+     forgetting ≤ C · (L_new - L_new(θ*))^{1/4} · (η · ‖∇L_pres‖²_max / μ²)^{1/4}
+
+   This is the fundamental tradeoff between new-task performance and forgetting under SFP.
+
+6. **Numerical verification.** With typical parameters:
+   - L = 10, μ = 0.1, κ = 100
+   - λ = 0.1, L_p = 5
+   - η = 1/(L + λ·L_p) = 1/10.5 ≈ 0.095
+
+   a) Effective condition number: κ_eff = 10.5/0.1 = 105
+   b) Steps for 0.01 relative error in L_new: K = 105 · log(100) ≈ 483
+   c) Steady-state drift: δ_∞ ≈ 0.095 · 0.1 · 1.0 / 0.1 = 0.095

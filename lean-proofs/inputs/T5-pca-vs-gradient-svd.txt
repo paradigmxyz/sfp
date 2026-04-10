@@ -1,0 +1,73 @@
+# Theorem T5: PCA vs Gradient-SVD Optimality
+
+## Definitions
+
+Let a ∈ ℝ^d be the activation at a given layer with population covariance Σ = E[(a - μ)(a - μ)^T].
+
+Let Σ have eigendecomposition Σ = Σ_{i=1}^d λ_i v_i v_i^T with λ_1 ≥ λ_2 ≥ ... ≥ λ_d ≥ 0.
+
+**PCA basis:** The top-r eigenvectors of Σ:
+  W_PCA = span(v_1, ..., v_r)
+
+**Gradient basis:** Let G = E[∇_a L_old · (∇_a L_old)^T] be the gradient outer product matrix (Fisher-like), with eigendecomposition G = Σ_{i=1}^d γ_i u_i u_i^T where γ_1 ≥ ... ≥ γ_d.
+  W_grad = span(u_1, ..., u_r)
+
+The **forgetting from subspace drift** when preserving subspace W:
+  F(W) = E[|L_old(θ) - L_old(θ_0)|² | drift only in W^⊥]
+
+Under a quadratic approximation (second-order Taylor):
+  L_old(θ) ≈ L_old(θ_0) + ⟨∇_a L_old, Δa⟩ + (1/2) Δa^T H Δa
+
+where H = ∇²_a L_old is the Hessian of the loss w.r.t. activations.
+
+Define the **variance ratio** and **gradient ratio**:
+  R_var(r) = Σ_{i=1}^r λ_i / Σ_{i=1}^d λ_i = trace(P_{W_PCA} Σ) / trace(Σ)
+  R_grad(r) = Σ_{i=1}^r γ_i / Σ_{i=1}^d γ_i = trace(P_{W_grad} G) / trace(G)
+
+Define the **cross-alignment** between PCA and gradient subspaces:
+  A(W_PCA, W_grad) = ‖P_{W_PCA} P_{W_grad}‖_F² / r
+
+This measures how much the top PCA directions overlap with the top gradient directions (A = 1 means perfect alignment, A ≈ 0 means orthogonal).
+
+## Claims
+
+1. **PCA optimality for variance-dominated forgetting.** If forgetting is linear in activation drift (first-order approximation: F ≈ ⟨∇L, Δa⟩) and ∇_a L_old is approximately uniform across directions (isotropic gradient), then W_PCA minimizes the expected forgetting:
+     W_PCA = argmin_{dim(W)=r} E[‖P_{W^⊥}(Δa)‖²]
+
+   Prove via: E[‖P_{W^⊥}(Δa)‖²] = trace(P_{W^⊥} Σ) = trace(Σ) - trace(P_W Σ), which is minimized when W captures the top eigenspace of Σ.
+
+2. **Gradient-SVD optimality for gradient-dominated forgetting.** If forgetting is dominated by directional sensitivity (F ≈ ⟨∇L, Δa⟩ with anisotropic ∇L), then W_grad minimizes the expected forgetting:
+     W_grad = argmin_{dim(W)=r} E[(∇_a L_old)^T P_{W^⊥} Δa)²]
+
+   Under the assumption that Δa is isotropic (identity covariance), this reduces to:
+     W_grad = argmax_{dim(W)=r} trace(P_W G)
+
+   which is the top-r eigenspace of G.
+
+3. **Formal decision boundary.** Define the optimality criterion:
+     W* = argmin_{dim(W)=r} E[(∇_a L_old)^T P_{W^⊥}(Δa)]²
+
+   Expanding with Δa ~ N(0, Σ):
+     E[(∇L)^T P_{W^⊥} Δa)²] = trace(P_{W^⊥} Σ^{1/2} G Σ^{1/2} P_{W^⊥}^T)
+
+   The optimal W* is the top-r eigenspace of the matrix M = Σ^{1/2} G Σ^{1/2}.
+
+   Special cases:
+   a) G ∝ I (isotropic gradient) → M ∝ Σ → W* = W_PCA
+   b) Σ ∝ I (isotropic activations) → M ∝ G → W* = W_grad
+   c) General: W* is neither W_PCA nor W_grad
+
+4. **Decision criterion.** Define the score:
+     S = trace(P_{W_PCA} M) / trace(P_{W_grad} M)
+
+   If S > 1, PCA is preferable. If S < 1, gradient-SVD is preferable.
+
+   Equivalently, PCA is optimal when:
+     R_var(r) · (1 + A(W_PCA, W_grad)) > R_grad(r)
+
+   This provides a computable diagnostic from the activation and gradient matrices.
+
+5. **Bound on suboptimality.** When using W_PCA instead of W_grad (or vice versa):
+     F(W_PCA) / F(W*) ≤ 1 + (1 - A(W_PCA, W_grad)) · (R_grad / R_var)
+
+   So when the cross-alignment A is close to 1 (PCA and gradient directions are similar), either choice is near-optimal.
