@@ -1,0 +1,416 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{natbib}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\newtheorem{remark}[theorem]{Remark}
+
+% Notation
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cov}{\mathrm{Cov}}
+\newcommand{\tr}{\mathrm{tr}}
+\newcommand{\proj}[1]{P_{#1}}
+\newcommand{\norm}[1]{\left\|#1\right\|}
+\newcommand{\abs}[1]{\left|#1\right|}
+\newcommand{\inner}[2]{\langle #1, #2 \rangle}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator{\im}{im}
+
+% Lean 4 code style
+\lstdefinestyle{lean}{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{blue!70!black}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  breaklines=true,
+  breakatwhitespace=true,
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{gray!50},
+  xleftmargin=1em,
+  columns=flexible,
+  literate={ℝ}{{\ensuremath{\mathbb{R}}}}1
+           {ℕ}{{\ensuremath{\mathbb{N}}}}1
+           {ℚ}{{\ensuremath{\mathbb{Q}}}}1
+           {≤}{{\ensuremath{\leq}}}1
+           {≥}{{\ensuremath{\geq}}}1
+           {≠}{{\ensuremath{\neq}}}1
+           {∀}{{\ensuremath{\forall}}}1
+           {∃}{{\ensuremath{\exists}}}1
+           {→}{{\ensuremath{\to}}}1
+           {←}{{\ensuremath{\leftarrow}}}1
+           {↔}{{\ensuremath{\leftrightarrow}}}1
+           {∈}{{\ensuremath{\in}}}1
+           {∉}{{\ensuremath{\notin}}}1
+           {⊆}{{\ensuremath{\subseteq}}}1
+           {λ}{{\ensuremath{\lambda}}}1
+           {·}{{\ensuremath{\cdot}}}1
+           {‖}{{\ensuremath{\|}}}1
+           {∨}{{\ensuremath{\lor}}}1
+           {∧}{{\ensuremath{\land}}}1
+           {⟨}{{\ensuremath{\langle}}}1
+           {⟩}{{\ensuremath{\rangle}}}1
+           {∑}{{\ensuremath{\sum}}}1
+           {Wᗮ}{{$W^\perp$}}2,
+  morekeywords={theorem,lemma,def,noncomputable,where,by,have,let,show,
+    sorry,Prop,Type,structure,class,instance,section,namespace,open,
+    import,variable,example,exact,apply,intro,simp,ring,linarith,
+    norm_num,positivity,grind,unfold,rw,fun,if,then,else,split_ifs,
+    nlinarith,calc,native_decide},
+}
+
+\title{Formalizing Sparse Feature Preservation:\\
+13 Lean~4 Theorems and Two Corrections}
+
+\author{
+  Diego Quinto\thanks{Correspondence: \texttt{github.com/0xQuinto}. Co-authorship offered to Georgios Konstantopoulos.} \\
+  \textit{Independent Researcher}
+}
+
+\date{April 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We formalize 13 theorems in Lean~4 for Sparse Feature Preservation~(SFP), a regularization method that mitigates catastrophic forgetting in continual LLM fine-tuning. The formalization process surfaced two substantive errors in our own informal reasoning: the exponent in an adaptive regularization schedule (corrected from $\exp(-\alpha t/2)$ to $\exp(-\alpha t)$) and the direction of optimal multi-task ordering (corrected from descending to ascending forgetting constant). All 13 theorems compile with zero \texttt{sorry} statements and extend the existing SFP Lean~4 library from 17 to 30 machine-verified results, covering finite-sample estimation bounds, distributional derivation of the core hypothesis, optimizer convergence, multi-task extensions, LoRA confounds, and evaluation axiomatics.
+\end{abstract}
+
+%=============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Formal verification of mathematical arguments is not bookkeeping---it reveals errors that survive human review. This paper reports two such corrections arising from mechanized proof of informal theorems about Sparse Feature Preservation~(SFP).
+
+SFP~\citep{sfp2025} prevents catastrophic forgetting in LLM fine-tuning by penalizing activation drift in a PCA-identified subspace. Given pre-trained parameters $\theta_0$ and a set of monitored layers, the training objective is
+\begin{equation}
+\label{eq:sfp-loss}
+L(\theta) = L_{\mathrm{new}}(\theta) + \lambda \sum_\ell \norm{\proj{W_\ell}\!\big(a_\ell(\theta) - a_\ell(\theta_0)\big)}^2,
+\end{equation}
+where $a_\ell(\theta) \in \R^d$ is the mean-pooled activation at layer $\ell$ and $\proj{W_\ell}$ is the orthogonal projection onto a $r$-dimensional subspace identified by PCA. The existing Lean~4 formalization provides 17 theorems establishing that if a ``forgetting constant'' $C > 0$ and preservation loss $\delta$ satisfy hypothesis H1, then $\text{forgetting} \leq C\sqrt{\delta}$.
+
+We contribute 13 additional theorems, bringing the total to 30 machine-verified results. Two of these theorems corrected errors in our prior informal analysis:
+
+\begin{enumerate}[nosep]
+\item \textbf{Adaptive $\lambda$ schedule (T6).} We conjectured the optimal regularization schedule was $\lambda(t) = \lambda_0 \exp(-\alpha t / 2)$. The Lean proof of the drift-balance condition forced a correction: the unique schedule achieving zero instantaneous drift is $\lambda(t) = \lambda_0 \exp(-\alpha t)$. The factor of $1/2$ in the exponent is erroneous.
+
+\item \textbf{Multi-task ordering (T9).} We stated that optimal task ordering is descending $C_k$ (highest forgetting constant first). The mechanized exchange argument showed the opposite: ascending $C_k$ is optimal, yielding a 46\% reduction in the forgetting bound in our numerical example.
+\end{enumerate}
+
+The 13 theorems span four tiers: bounding $C$ (\S\ref{sec:tier1}), deriving H1 (\S\ref{sec:tier2}), optimizer dynamics (\S\ref{sec:tier3}), and extensions (\S\ref{sec:tier4}). All proofs were generated using Aristotle~\citep{aristotle2025} and are available at:
+
+\smallskip
+\noindent\url{https://github.com/0xQuinto/sfp/tree/formal-improvements/lean-proofs}
+
+%=============================================================================
+\section{Background}
+\label{sec:background}
+
+\paragraph{Notation.} Let $\theta \in \R^p$ denote network parameters, $a_\ell(\theta; x) \in \R^d$ the mean-pooled activation at layer~$\ell$ on input~$x$, and $\Delta a_\ell = a_\ell(\theta) - a_\ell(\theta_0)$ the activation drift. For a subspace $W \subseteq \R^d$ with orthonormal basis $U \in \R^{d \times r}$, the projection is $\proj{W} = UU^\top$.
+
+\paragraph{SFP setup.} At each task boundary, SFP collects activations from a memory buffer of $n$ old-task examples, computes a PCA basis at selected layers, and caches anchor projections. The upstream implementation selects layers at fixed relative depths $\{0.25, 0.5, 0.75\}$ with a default buffer of $n = 128$.
+
+\paragraph{Hypothesis H1.} The core SFP hypothesis posits subspaces $W_\ell$ and a constant $C > 0$ such that $\abs{L_{\mathrm{old}}(\theta) - L_{\mathrm{old}}(\theta_0)} \leq C \sum_\ell \norm{\proj{W_\ell}(\Delta a_\ell)}$. The upstream formalization treats H1 as an axiom; we derive it as a theorem in \S\ref{sec:tier2}.
+
+\paragraph{Formalization workflow.} Each theorem is written as a structured input file (definitions, assumptions, claims), submitted to Aristotle~\citep{aristotle2025}, which generates a complete Lean~4 project with Mathlib dependencies. We verify zero \texttt{sorry} statements.
+
+%=============================================================================
+\section{Tier 1: Bounding the Forgetting Constant}
+\label{sec:tier1}
+
+\subsection{T1: Forgetting Constant as OLS Coefficient}
+
+The forgetting constant $C_\ell$ has the same structure as Kyle's Lambda in market microstructure~\citep{kyle1985}: both are OLS slopes of the form $\beta = \Cov(Y, X) / \Var(X)$.
+
+\begin{definition}[Forgetting constant]
+\label{def:C}
+Let $D_\ell = \norm{\proj{W}(\Delta a_\ell)}$ and $F = L_{\mathrm{old}}(\theta) - L_{\mathrm{old}}(\theta_0)$. The forgetting constant is $C_\ell = \Cov(F, D_\ell) / \Var(D_\ell)$.
+\end{definition}
+
+\begin{theorem}[OLS identity --- T1]
+\label{thm:ols}
+Under the linear model $F = C_\ell D_\ell + \varepsilon$ with $\E[\varepsilon D_\ell] = 0$ and $\Var(D_\ell) \neq 0$:
+\[
+C_\ell = \frac{\E[FD_\ell] - \E[F]\E[D_\ell]}{\E[D_\ell^2] - (\E[D_\ell])^2}.
+\]
+\end{theorem}
+
+\noindent\textit{Lean~4 (verified, 0 \texttt{sorry}):}
+\begin{lstlisting}[style=lean]
+theorem ols_coefficient_identity
+    (C E_D E_D2 E_F E_FD : ℝ)
+    (hVarD : E_D2 - E_D ^ 2 ≠ 0)
+    (hFD : E_FD = C * E_D2) -- E[FD] = C · E[D²]
+    (hF : E_F = C * E_D) :  -- E[F] = C · E[D]
+    C = (E_FD - E_F * E_D) / (E_D2 - E_D ^ 2) := by
+  grind
+\end{lstlisting}
+
+The \texttt{grind} closer is deliberate: the result is algebraically immediate once stated correctly. The difficulty is \emph{identifying} $C$ as an OLS coefficient, not proving the identity.
+
+\begin{theorem}[Finite-sample concentration --- T1]
+\label{thm:concentration}
+Under sub-Gaussian assumptions ($D_\ell$ is $\sigma_D$-sub-Gaussian, $F$ is $\sigma_F$-sub-Gaussian, $\Var(D_\ell) \geq v_{\min} > 0$), for $n$ i.i.d.\ samples and $\delta \in (0,1)$:
+\[
+\Pr\!\left(\abs{\hat{C}_\ell - C_\ell} > \varepsilon\right) \leq \delta, \quad \varepsilon = \frac{\sigma_F \sigma_D}{v_{\min}} \sqrt{\frac{2\log(2/\delta)}{n}}.
+\]
+The bound is monotone decreasing in $n$ and non-vacuous when $n > 2\sigma_F^2 \sigma_D^2 \log(2/\delta) / (v_{\min}^2 \varepsilon_{\mathrm{target}}^2)$.
+\end{theorem}
+
+\begin{theorem}[Layer selection optimality --- T1]
+\label{thm:layer-select}
+Selecting the $K$ layers with smallest $\hat{C}_\ell$ minimizes $\sum_{\ell \in S} C_\ell \sqrt{\delta_\ell}$ over all $K$-element subsets.
+\end{theorem}
+
+\subsection{T2: Davis-Kahan Buffer Sizing}
+
+The PCA subspace $\hat{W}$ estimated from $n$ samples satisfies the Davis-Kahan bound~\citep{daviskahan1970}: $\sin\theta(\hat{W}, W) \leq \norm{\hat{\Sigma} - \Sigma}_{\mathrm{op}} / \Delta_k$, where $\Delta_k = \lambda_k - \lambda_{k+1}$ is the eigenvalue gap. Combined with sub-Gaussian concentration, this gives a minimum buffer size $n \geq \sigma^4 \log(2/\delta) / (c \cdot \Delta_k^2 \cdot t^2)$ for $\sin\theta \leq t$ with probability $\geq 1-\delta$. The preservation loss error from using $\hat{W}$ instead of $W$ is bounded by $\abs{\hat{L}_{\mathrm{pres}} - L_{\mathrm{pres}}} \leq 2\sin\theta \cdot \norm{\Delta a}^2$.
+
+%=============================================================================
+\section{Tier 2: Strengthening H1}
+\label{sec:tier2}
+
+\subsection{T3: H1 as Theorem Under Exponential Family}
+
+The upstream formalization treats H1 as an axiom. We derive it as a consequence of a distributional assumption.
+
+\begin{assumption}[Exponential family activations]
+\label{asm:expfam}
+The activation distribution belongs to an exponential family with linear sufficient statistic $T(a_\ell) = \proj{W}(a_\ell)$.
+\end{assumption}
+
+\begin{theorem}[Sufficiency of projected activations --- T3]
+\label{thm:sufficiency}
+Under \Cref{asm:expfam}, $L_{\mathrm{old}}(\theta) = \E_x[g(\proj{W}(a_\ell(\theta; x)))]$ for some function~$g$. The old-task loss depends on activations only through $\proj{W}(a_\ell)$.
+\end{theorem}
+
+This follows from the Neyman-Fisher factorization theorem: the likelihood factors through the sufficient statistic, so any loss depending on the likelihood depends only on $T(a_\ell) = \proj{W}(a_\ell)$.
+
+\begin{theorem}[H1 as consequence --- T3]
+\label{thm:h1}
+Under \Cref{asm:expfam} with $g$ being $C$-Lipschitz:
+$\abs{L_{\mathrm{old}}(\theta) - L_{\mathrm{old}}(\theta_0)} \leq C \cdot \norm{\proj{W}(\Delta a_\ell)}.$
+\end{theorem}
+
+\noindent\textit{Lean~4 (verified, 0 \texttt{sorry}):}
+\begin{lstlisting}[style=lean]
+theorem H1_from_lipschitz
+    (W : Submodule ℝ E) [W.HasOrthogonalProjection]
+    (g : E → ℝ) (C : ℝ≥0) (hLip : LipschitzWith C g)
+    (L_old : E → ℝ)
+    (hfactor : ∀ a : E, L_old a = g (projOnto W a))
+    (a a₀ : E) :
+    |L_old a - L_old a₀| ≤ C * ‖projOnto W (a - a₀)‖ := by
+  -- proof in appendix
+\end{lstlisting}
+
+\begin{corollary}[Orthogonal complement irrelevance --- T3]
+Under the same assumptions, $\partial L_{\mathrm{old}} / \partial(\proj{W^\perp}(a_\ell)) = 0$. Fine-tuning can freely modify the orthogonal complement. The Lean formalization verifies: for any $v \in W^\perp$, $L_{\mathrm{old}}(a + v) = L_{\mathrm{old}}(a)$.
+\end{corollary}
+
+\begin{remark}[Diagnostic]
+The assumption is testable via $R^2 = 1 - \Var(L_{\mathrm{old}} \mid \proj{W}(a_\ell)) / \Var(L_{\mathrm{old}})$. The empirical $R^2 = 0.933$ for Qwen2.5-1.5B~\citep{sfp2025} supports it.
+\end{remark}
+
+\subsection{T4: Ablation Importance Equals Causal Importance}
+
+Under an additivity assumption ($f(\alpha_1, \ldots, \alpha_d) = g_0 + \sum_i g_i(\alpha_i)$), the ablation importance of each PCA direction equals its Shapley value~\citep{shapley1953}. The ablation ranking is therefore the unique fair ranking. Without additivity, we provide a counterexample where the ablation-top-$r$ set is suboptimal by a factor of $\Omega(d)$. The Lean formalization includes both the equivalence proof and the explicit counterexample construction.
+
+\subsection{T5: PCA vs.\ Gradient-SVD Optimality}
+
+The optimal preservation subspace minimizing expected squared forgetting $\E[(\nabla L^\top \proj{W^\perp} \Delta a)^2]$ is the top-$r$ eigenspace of $M = \Sigma^{1/2} G \Sigma^{1/2}$, where $\Sigma$ is the drift covariance and $G$ the gradient outer product. This follows from the Ky Fan inequality. PCA ($G \propto I$) and gradient-SVD ($\Sigma \propto I$) emerge as special cases. A computable decision score determines which is preferable.
+
+%=============================================================================
+\section{Tier 3: Optimizer Dynamics}
+\label{sec:tier3}
+
+\subsection{T6: The Adaptive $\lambda$ Correction}
+\label{sec:t6}
+
+This is the paper's primary exhibit of formalization catching an error.
+
+\paragraph{Setup.} Suppose the gradient signal in the preserved subspace decays exponentially: $s(t) = \norm{\proj{W}\nabla L_{\mathrm{new}}(\theta_t)}^2 = s_0 e^{-\alpha t}$. The drift evolves as $\delta(t+1) \approx (1 - 2\eta\lambda(t))\delta(t) + \eta \cdot s(t)$. We sought a schedule $\lambda(t)$ that holds $\delta(t)$ at a constant target $\delta_{\mathrm{target}}$.
+
+\paragraph{The conjecture.} Setting $d\delta/dt = 0$ with $\delta = \delta_{\mathrm{target}}$ requires $2\lambda(t) \cdot \delta_{\mathrm{target}} = \eta \cdot s(t)$, giving $\lambda(t) = \eta s_0 e^{-\alpha t} / (2\delta_{\mathrm{target}}) = \lambda_0 e^{-\alpha t}$. We initially wrote $\lambda_0 \exp(-\alpha t / 2)$.
+
+\paragraph{How Lean caught it.} The proof obligation for zero instantaneous drift reduces to showing that $\lambda_0 \exp(-\alpha t / 2) \cdot \delta_{\mathrm{target}}$ cancels $\eta \cdot s_0 \exp(-\alpha t)$. This requires $\exp(-\alpha t / 2) = \exp(-\alpha t)$, which is false. The Lean file makes the correction explicit:
+
+\begin{lstlisting}[style=lean]
+-- The original (incorrect) conjecture
+def adaptiveLambdaSchedule (lam₀ a : ℝ) (t : ℝ) : ℝ :=
+  lam₀ * exp (-a * t / 2)
+
+-- The corrected schedule
+def correctAdaptiveSchedule (lam₀ a : ℝ) (t : ℝ) : ℝ :=
+  lam₀ * exp (-a * t)
+\end{lstlisting}
+
+The theorem that closes the correction:
+\begin{lstlisting}[style=lean]
+theorem exponential_schedule_constant_drift
+    (eta s₀ a d_target : ℝ)
+    (_heta : 0 < eta) (_hs₀ : 0 < s₀) (hd : 0 < d_target) :
+    let lam₀ := eta * s₀ / (2 * d_target)
+    ∀ t : ℝ, instantaneousDriftRate eta (signalDecay s₀ a t)
+      (correctAdaptiveSchedule lam₀ a t) d_target = 0 := by
+  -- unfold + ring; see appendix
+\end{lstlisting}
+
+The corrected schedule uses $\exp(-\alpha t)$, not $\exp(-\alpha t/2)$. The original error was a factor-of-two mistake in tracing through the drift balance equation---exactly the kind of error that persists through informal review but cannot survive a proof checker.
+
+\subsection{T7: SGD Convergence Under SFP}
+
+Under standard assumptions ($L_{\mathrm{new}}$ is $L$-smooth and $\mu$-strongly convex, step size $\eta \leq 1/(L + \lambda L_p)$), after $K$ gradient steps:
+\begin{align}
+L_{\mathrm{new}}(\theta_K) - L_{\mathrm{new}}(\theta^*) &\leq \left(1 - \frac{\mu}{L + \lambda L_p}\right)^K\!\! (L_{\mathrm{new}}(\theta_0) - L_{\mathrm{new}}(\theta^*)) + \frac{\lambda \delta_{\max}}{\mu}, \label{eq:convergence} \\
+\delta_K &\leq (1 - \eta\mu)^K \delta_0 + \frac{\eta\lambda}{\mu}\norm{\nabla L_{\mathrm{pres}}}_{\max}^2. \label{eq:drift}
+\end{align}
+The effective condition number is $\kappa_{\mathrm{eff}} = (L + \lambda L_p)/\mu$. Eliminating $\lambda$ yields a Pareto frontier: $\text{forgetting} \leq C \cdot (L_{\mathrm{new}} - L_{\mathrm{new}}(\theta^*))^{1/4} \cdot (\eta \norm{\nabla L_{\mathrm{pres}}}_{\max}^2 / \mu^2)^{1/4}$.
+
+\subsection{T8: Bound Tightness}
+
+The exponent $1/2$ in $\text{forgetting} \leq C\sqrt{\delta}$ is tight: the construction $L_{\mathrm{old}}(a) = \norm{\proj{W}(a - a_0)}$ achieves $\text{forgetting} = \sqrt{\delta}$ exactly. However, when $\nabla L_{\mathrm{old}}(\theta_0) = 0$ (the typical LLM regime where $\theta_0$ is near-optimal on the old task), forgetting scales as $O(\delta)$---the bound is loose by $\sqrt{\delta}$. This dichotomy explains why SFP works better in practice than the worst-case bound suggests.
+
+%=============================================================================
+\section{Tier 4: Extensions}
+\label{sec:tier4}
+
+\subsection{T9: The Multi-Task Ordering Correction}
+\label{sec:t9}
+
+This is the paper's second exhibit of formalization catching an error.
+
+\paragraph{Setup.} Consider sequential fine-tuning on tasks $T_1, \ldots, T_K$. The cumulative forgetting bound telescopes as $F_{\mathrm{total}} \leq \sum_{k=1}^{K-1} C_{\pi(k)} \cdot w_k$, where $w_k = (K-k)\sqrt{\delta_{\max}}$ is a decreasing weight (later tasks incur less subsequent drift).
+
+\paragraph{The correction.} To minimize $\sum_k C_{\pi(k)} w_k$ with $w_k$ decreasing, the rearrangement inequality says: pair the largest weight with the \emph{smallest} $C$. The optimal order is \emph{ascending} $C_k$---fine-tune the least forgettable task first. We initially stated the opposite.
+
+The Lean formalization verifies the exchange argument:
+\begin{lstlisting}[style=lean]
+theorem exchange_reduces_cost
+    (n : ℕ) (C : Fin n → ℝ) (w : Fin n → ℝ)
+    (hw : ∀ i j : Fin n, i < j → w j < w i) -- w decreasing
+    (i : Fin n) (hi : i.val + 1 < n)
+    (hCi : C i > C ⟨i.val + 1, hi⟩) :
+    -- swapping adjacent out-of-order pair reduces cost
+    ∑ k, C' k * w k < ∑ k, C k * w k := by
+\end{lstlisting}
+
+\paragraph{Numerical verification.} With $K = 5$, $C \in \{0.5, 0.8, 1.2, 0.3, 0.7\}$, $\sqrt{\delta_{\max}} = 0.1$: ascending~$C$ gives bound~$0.49$ vs.\ descending~$0.91$ (46\% reduction). All three numerical claims are machine-checked by \texttt{norm\_num}.
+
+\subsection{T10: Per-Layer Optimal Weighting}
+
+Minimizing $\sum_\ell C_\ell \sqrt{s_\ell / (2\lambda_\ell)}$ subject to $\sum_\ell \lambda_\ell = \Lambda$ yields, via Lagrange multipliers, the optimal weights $\lambda_\ell^* = \Lambda \cdot (C_\ell \sqrt{s_\ell})^{2/3} / \sum_j (C_j \sqrt{s_j})^{2/3}$, where $s_\ell = \norm{\proj{W_\ell}\nabla_{a_\ell} L_{\mathrm{new}}}^2$. When gradient signal is uniform across layers: $\lambda_\ell^* \propto C_\ell^{2/3}$. The Lean proof establishes $F(\lambda^*) \leq F(\lambda_{\mathrm{uniform}})$ via a tangent-line convexity argument.
+
+\subsection{T11: Projection Information Loss}
+
+Under Gaussian assumptions ($a \sim \mathcal{N}(\mu, \Sigma)$, $Y = w^\top a + \varepsilon$), the information lost by projecting to the top-$r$ PCA subspace is $I(Y; a) - I(Y; \proj{W}(a)) = \frac{1}{2}\log(1 + \norm{\proj{W^\perp} w}^2 \lambda_{r+1} / \sigma_\varepsilon^2)$. When task-relevant directions align with high-variance PCA directions, the explained variance ratio $\rho(r)$ approximates the fraction of task information retained.
+
+\subsection{T12: LoRA Confound}
+
+Under LoRA~\citep{hu2022lora}, activation drift $\Delta a = BAx$ lies in $\im(B)$ with $\dim(\im(B)) \leq r_{\mathrm{lora}}$. When $r_{\mathrm{lora}} \leq r_{\mathrm{sfp}}$ and $\im(B) \subseteq W_{\mathrm{SFP}}$, H1 holds trivially---all drift is captured by the preservation subspace by construction, not by learned feature structure. The high $R^2$ from drift-forgetting regression is an artifact of low-rank confinement. The confound is negligible when $r_{\mathrm{lora}} \geq 2r_{\mathrm{sfp}}$. This theorem is a methodological warning: full fine-tuning experiments are the gold standard for validating~H1.
+
+\subsection{T13: Harmonic Mean Scorer}
+
+The leaderboard scorer $H(R, P) = 2RP/(R+P)$ is the unique power mean satisfying zero-forcing ($H = 0$ iff $R = 0$ or $P = 0$). It equals the Nash bargaining solution~\citep{nash1950} between retention-maximizing and plasticity-maximizing agents. The failure of the previously used weighted linear score is machine-checked:
+
+\begin{lstlisting}[style=lean]
+theorem weightedLinear_violates_P1 :
+    weightedLinear 0 1 = 0.4 := by norm_num
+\end{lstlisting}
+
+A model that forgets everything scores $0.4$ under the linear scorer but $0$ under the harmonic mean.
+
+%=============================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{What class of error does formalization catch?} Both corrections involve a sign or factor error in an exponent (T6) or inequality direction (T9) that passed informal review. The T6 error requires working through the full drift balance equation to spot; the T9 error requires carefully tracking which direction the rearrangement inequality runs. Lean~4 forces complete proof terms that cannot silently absorb such errors.
+
+\paragraph{What formalization does not do.} The Lean proofs verify that abstract mathematical claims follow from stated assumptions. They do not verify that the assumptions hold for real LLMs, that numerical constants ($\sigma_F$, $\sigma_D$, $v_{\min}$) match practice, or that the Python implementation correctly reflects the theorems. This gap is the main limitation.
+
+\paragraph{Framing these corrections.} Neither correction invalidates the SFP algorithm. T6 tightens the adaptive schedule (which is not yet implemented upstream). T9 corrects the ordering heuristic for multi-task settings (also not yet implemented). The corrections are valuable precisely because they were found \emph{before} implementation, not after a production failure.
+
+\paragraph{Future work.} (a)~Close the T7 Pareto frontier to explicit constants for specific architectures. (b)~Formalize the adaptive $\alpha$ estimation error from T6 more tightly. (c)~Investigate whether T12's LoRA confound can be turned into a positive result (conditions under which LoRA~+~SFP is provably redundancy-free).
+
+%=============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+We contribute 13 machine-checked Lean~4 theorems strengthening the mathematical foundations of SFP, spanning layer selection, optimizer dynamics, multi-task extensions, and evaluation design. The formalization process caught two substantive errors in our prior informal reasoning: the exponent in the adaptive $\lambda$ schedule~(T6) and the direction of the optimal task ordering~(T9). All proofs are zero-\texttt{sorry} and available at the project repository.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+%=============================================================================
+\appendix
+
+\section{Theorem Correspondence Table}
+\label{app:table}
+
+\begin{table}[h]
+\centering
+\footnotesize
+\begin{tabular}{@{}cllll@{}}
+\toprule
+\textbf{ID} & \textbf{Name} & \textbf{Lean File} & \textbf{Key Lemma} & \textbf{Sorries} \\
+\midrule
+T1 & Forgetting constant & \texttt{ForgettingConstantBound.lean} & \texttt{ols\_coefficient\_identity} & 0 \\
+T2 & Davis-Kahan buffer & \texttt{DavisKahan.lean} & \texttt{buffer\_size\_sufficient} & 0 \\
+T3 & Conditional H1 & \texttt{T3ConditionalH1.lean} & \texttt{H1\_from\_lipschitz} & 0 \\
+T4 & Ablation = Shapley & \texttt{AblationCausalImportance.lean} & \texttt{ablation\_eq\_shapley} & 0 \\
+T5 & PCA vs gradient-SVD & \texttt{T5PcaVsGradientSvd.lean} & \texttt{combined\_optimality} & 0 \\
+T6 & Adaptive $\lambda$ & \texttt{T6AdaptiveLambda\ldots.lean} & \texttt{exponential\_schedule\ldots} & 0 \\
+T7 & SGD convergence & \texttt{SGDConvergence.lean} & \texttt{linear\_convergence\ldots} & 0 \\
+T8 & Bound tightness & \texttt{BoundTightness.lean} & \texttt{forgetting\_eq\_sqrt\ldots} & 0 \\
+T9 & Multi-task ordering & \texttt{T9MultiTask\ldots.lean} & \texttt{exchange\_reduces\_cost} & 0 \\
+T10 & Optimal weighting & \texttt{T10MultiLayer\ldots.lean} & \texttt{optWeight\_minimizes} & 0 \\
+T11 & Information loss & \texttt{T11Projection\ldots.lean} & \texttt{infoLoss\_le} & 0 \\
+T12 & LoRA confound & \texttt{T12LoRAConfound.lean} & \texttt{out\_of\_SFP\_sufficient\ldots} & 0 \\
+T13 & Harmonic mean & \texttt{HarmonicMeanScorer.lean} & \texttt{harmonicMean\_zero\_iff} & 0 \\
+\bottomrule
+\end{tabular}
+\caption{Correspondence between informal theorems and Lean~4 identifiers. All 13 compile with zero \texttt{sorry}.}
+\label{tab:correspondence}
+\end{table}
+
+\section{T3 Proof Sketch: Deriving H1}
+\label{app:t3}
+
+Under \Cref{asm:expfam}, the activation distribution at layer $\ell$ has density
+\[
+p(a_\ell \mid x) = h(a_\ell) \exp\!\big(\eta(x)^\top T(a_\ell) - A(\eta(x))\big)
+\]
+with $T(a_\ell) = \proj{W}(a_\ell)$.
+
+\textit{Step 1 (Sufficiency).} By the Neyman-Fisher factorization theorem, the likelihood ratio $p(a_\ell \mid x) / p(a_\ell \mid x')$ depends on $a_\ell$ only through $T(a_\ell) = \proj{W}(a_\ell)$. Any loss function $L_{\mathrm{old}}(\theta)$ that depends on the distribution of $a_\ell$ therefore factors as $L_{\mathrm{old}}(\theta) = g(\proj{W}(a_\ell(\theta)))$ for some $g$.
+
+\textit{Step 2 (Lipschitz bound).} If $g$ is $C$-Lipschitz ($\abs{g(u) - g(v)} \leq C\norm{u-v}$ for all $u, v$), then $\abs{L_{\mathrm{old}}(\theta) - L_{\mathrm{old}}(\theta_0)} = \abs{g(\proj{W}(a_\ell(\theta))) - g(\proj{W}(a_\ell(\theta_0)))} \leq C \norm{\proj{W}(\Delta a_\ell)}$, which is H1.
+
+\textit{Step 3 (Orthogonal irrelevance).} Since $g$ depends only on $\proj{W}(a_\ell)$, adding any $v \in W^\perp$ to $a_\ell$ does not change the loss: $\proj{W}(a_\ell + v) = \proj{W}(a_\ell)$.
+
+\textit{Step 4 (Diagnostic).} If $R^2 \coloneqq 1 - \Var(L_{\mathrm{old}} \mid \proj{W}(a_\ell)) / \Var(L_{\mathrm{old}}) = 1$, then $L_{\mathrm{old}}$ is a deterministic function of $\proj{W}(a_\ell)$, which implies the factorization in Step~1. The empirical $R^2 = 0.933$ indicates the assumption is approximately satisfied.
+
+\end{document}
