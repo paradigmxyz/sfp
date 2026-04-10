@@ -58,5 +58,10 @@ testpaths = ["tests"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["sfp", "tasks"]
