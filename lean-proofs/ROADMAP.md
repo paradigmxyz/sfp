@@ -4,8 +4,8 @@
 
 | ID | Name | Status | UUID | Sorries |
 |----|------|--------|------|---------|
-| T1 | Forgetting constant as regression coefficient | submitted | a941031a-ed66-42b7-8ae2-db8a7b06e132 | — |
-| T2 | Davis-Kahan buffer sizing | submitted | 1aeca406-21cb-4d29-a423-65f5d8e6d8da | — |
+| T1 | Forgetting constant as regression coefficient | proved | a941031a-ed66-42b7-8ae2-db8a7b06e132 | 0 |
+| T2 | Davis-Kahan buffer sizing | proved | 1aeca406-21cb-4d29-a423-65f5d8e6d8da | 0 |
 
 ## Tier 2 — Strengthening H1
 

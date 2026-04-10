@@ -1,0 +1,73 @@
+# Theorem T1: Forgetting Constant as Regression Coefficient with Finite-Sample Bound
+
+## Definitions
+
+Let a_ℓ(θ) ∈ ℝ^d be the mean-pooled activation at layer ℓ of a neural network with parameters θ.
+
+Let W ⊂ ℝ^d be a subspace of dimension r, and P_W the orthogonal projection onto W.
+
+Let θ_0 be the parameters before fine-tuning on a new task, and θ_t the parameters after t gradient steps.
+
+Define:
+  Δa_ℓ(t) = a_ℓ(θ_t) - a_ℓ(θ_0)             (activation drift at layer ℓ)
+  D_ℓ(t) = ‖P_W(Δa_ℓ(t))‖                     (subspace drift magnitude)
+  F(t) = L_old(θ_t) - L_old(θ_0)              (forgetting = old-task loss increase)
+
+The forgetting constant at layer ℓ is the OLS regression coefficient:
+  C_ℓ = Cov(F, D_ℓ) / Var(D_ℓ)
+
+where expectations are over a distribution of inputs x from the old task.
+
+Given n i.i.d. samples (x_1, ..., x_n) from the old task, define the sample estimator:
+  Ĉ_ℓ = Ĉov(F, D_ℓ) / V̂ar(D_ℓ)
+
+where Ĉov and V̂ar are sample covariance and variance.
+
+Assume:
+  (A1) D_ℓ is σ_D-sub-Gaussian: E[exp(s(D_ℓ - E[D_ℓ]))] ≤ exp(s²σ_D²/2) for all s ∈ ℝ
+  (A2) F is σ_F-sub-Gaussian: E[exp(s(F - E[F]))] ≤ exp(s²σ_F²/2) for all s ∈ ℝ
+  (A3) Var(D_ℓ) ≥ v_min > 0  (non-degenerate subspace drift)
+
+## Claims
+
+1. **OLS coefficient identity.** Under the linear model F = C_ℓ · D_ℓ + ε with E[ε | D_ℓ] = 0:
+     C_ℓ = Cov(F, D_ℓ) / Var(D_ℓ)
+   This is the minimum-variance unbiased estimator of the slope.
+
+2. **Finite-sample concentration.** Under assumptions (A1)-(A3), for any δ ∈ (0, 1):
+     P(|Ĉ_ℓ - C_ℓ| > ε) ≤ δ
+   where:
+     ε = (σ_F · σ_D / v_min) · √(2 · log(2/δ) / n)
+
+   Prove this via:
+   a) Ĉov(F, D_ℓ) - Cov(F, D_ℓ) is bounded by Hoeffding for sub-Gaussian products
+   b) V̂ar(D_ℓ) concentrates around Var(D_ℓ) ≥ v_min
+   c) Ratio concentration via the quotient rule
+
+3. **Non-vacuity condition.** The bound C_ℓ + ε is non-vacuous (i.e., provides useful information) when:
+     n > 2 · (σ_F · σ_D)² · log(2/δ) / (v_min · ε_target)²
+
+   For a target bound width ε_target = 0.1 · C_ℓ (10% relative error), the minimum buffer size is:
+     n_min = 200 · (σ_F · σ_D)² / (v_min · C_ℓ)²
+
+4. **Layer selection optimality.** Given L layers with forgetting constants C_1, ..., C_L, selecting the K layers with smallest Ĉ_ℓ minimizes the total forgetting bound:
+     Σ_{ℓ ∈ S} C_ℓ · √δ_ℓ ≤ Σ_{ℓ ∈ S'} C_ℓ · √δ_ℓ
+   for any other set S' with |S'| = K, when δ_ℓ is equalized across layers.
+
+5. **Connection to Kyle's Lambda.** If we define:
+     λ_Kyle = Cov(Δprice, order_flow) / Var(order_flow)
+   and:
+     C_ℓ = Cov(Δloss, ‖P_W(Δa_ℓ)‖) / Var(‖P_W(Δa_ℓ)‖)
+
+   Both are OLS slope coefficients of the form β = Cov(Y, X) / Var(X). Under the same sub-Gaussian assumptions, the same finite-sample bounds apply to both. Prove the structural identity: the bound in Claim 2 holds for any (Y, X) pair satisfying (A1)-(A2).
+
+6. **Numerical verification.** With parameters from Qwen2.5-1.5B SFP experiments:
+   - R² = 0.933 for top-r drift predicting forgetting
+   - n = 128 (default memory buffer)
+   - Assume σ_F ≈ σ_D ≈ 1 (standardized), v_min = 0.5
+   - δ = 0.05
+
+   Compute:
+   a) ε = (1 · 1 / 0.5) · √(2 · log(40) / 128) ≈ 2 · √(7.38 / 128) ≈ 2 · 0.240 ≈ 0.480
+   b) Verify that with n = 512, ε ≈ 0.240 (halved, as expected from √n scaling)
+   c) For 10% relative error on C ≈ 1.0, n_min = 200 · 1 / (0.5 · 1)² = 800
