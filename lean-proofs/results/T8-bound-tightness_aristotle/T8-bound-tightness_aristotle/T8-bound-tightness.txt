@@ -1,0 +1,62 @@
+# Theorem T8: Bound Tightness (Lower Bound on Forgetting)
+
+## Definitions
+
+Recall the SFP forgetting upper bound (from upstream formalization):
+  forgetting ≤ C · √δ
+
+where:
+  forgetting = |L_old(θ) - L_old(θ_0)|
+  δ = Σ_ℓ ‖P_{W_ℓ}(a_ℓ(θ) - a_ℓ(θ_0))‖²  (subspace drift)
+  C > 0 is the forgetting constant
+
+We want to show this √δ scaling is tight — there exist cases where forgetting = Ω(√δ).
+
+## Claims
+
+1. **Lower bound construction (1D case).** There exists a loss function L_old, a subspace W, and a parameter trajectory {θ_t} such that:
+     |L_old(θ_t) - L_old(θ_0)| ≥ (C/2) · √δ(t)
+
+   Construction: Let d = 1 (scalar activation), W = ℝ^1, and:
+     L_old(θ) = √(|a(θ) - a(θ_0)|²) = |a(θ) - a(θ_0)|
+
+   Then δ(t) = |a(θ_t) - a(θ_0)|² and forgetting = |a(θ_t) - a(θ_0)| = √δ(t).
+
+   This exactly matches the √δ scaling with C = 1.
+
+2. **General lower bound.** For any dimension d, subspace dimension r, and forgetting constant C > 0, there exists:
+   - A loss function L_old : ℝ^d → ℝ satisfying H1 with constant C
+   - A drift vector Δa ∈ ℝ^d with ‖P_W(Δa)‖² = δ
+
+   such that:
+     |L_old(Δa)| ≥ C · √δ / √r
+
+   Construction: Let L_old(a) = (C/√r) · ‖P_W(a - a_0)‖ (Euclidean norm in the subspace).
+   This is C-Lipschitz (since ‖∇L_old‖ = C/√r · P_W(Δa)/‖P_W(Δa)‖, with ‖·‖ ≤ C).
+   Set Δa = δ^{1/2} · w for any unit w ∈ W. Then forgetting = (C/√r) · √δ.
+
+3. **Tightness of the √δ rate.** The exponent 1/2 in the √δ bound is tight:
+   - Upper bound: forgetting ≤ C · √δ (from upstream SFP formalization)
+   - Lower bound: forgetting ≥ Ω(C · √δ) (from Claims 1-2)
+
+   No bound of the form forgetting ≤ C · δ^α with α > 1/2 can hold in general.
+
+   Prove via: if such a bound held, it would contradict the lower bound construction in Claim 2 for small δ.
+
+4. **When the bound is NOT tight — quadratic regime.** If L_old is twice differentiable and ∇L_old(θ_0) = 0 (θ_0 is a critical point of the old-task loss), then:
+     forgetting = (1/2) · Δa^T ∇²L_old · Δa + O(‖Δa‖³) = O(δ)
+
+   In this case, forgetting scales linearly with δ, not as √δ. The √δ bound is loose.
+
+   This happens when the pre-trained model is at a local minimum of L_old (which is typical after sufficient pre-training).
+
+5. **Refined bound: √δ vs δ dichotomy.** Combining:
+   - If ‖∇L_old(θ_0)‖ > 0: forgetting = Θ(√δ) — the √δ bound is tight
+   - If ∇L_old(θ_0) = 0: forgetting = O(δ) — the bound is loose by a √δ factor
+
+   The practical regime for LLM fine-tuning is typically ∇L_old(θ_0) ≈ 0 (pre-trained model is near-optimal on old task), so forgetting scales as O(δ) in practice.
+
+6. **Implication for SFP.** The √δ vs δ dichotomy implies:
+   - The upstream SFP bound `sfp_reduces_forgetting` is correct but conservative in the typical LLM regime
+   - A tighter bound forgetting ≤ C' · δ holds when ∇L_old(θ_0) ≈ 0
+   - This explains why SFP works better than the worst-case bound suggests
