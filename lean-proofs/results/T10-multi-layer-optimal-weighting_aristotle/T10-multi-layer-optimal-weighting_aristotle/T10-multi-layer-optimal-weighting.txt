@@ -1,0 +1,75 @@
+# Theorem T10: Multi-Layer Optimal Weighting
+
+## Definitions
+
+The SFP preservation loss with per-layer weights:
+  L_pres(θ) = Σ_{ℓ=1}^L λ_ℓ · ‖P_{W_ℓ}(a_ℓ(θ) - a_ℓ(θ_0))‖²
+
+The current (upstream) implementation uses uniform weights: λ_ℓ = λ for all ℓ.
+
+Forgetting bound from H1:
+  forgetting ≤ Σ_{ℓ=1}^L C_ℓ · ‖P_{W_ℓ}(Δa_ℓ)‖
+
+where C_ℓ is the forgetting constant at layer ℓ (from T1).
+
+Define the per-layer drift:
+  d_ℓ = ‖P_{W_ℓ}(a_ℓ(θ) - a_ℓ(θ_0))‖²
+
+Under gradient descent with SFP regularization, the equilibrium drift at layer ℓ is approximately:
+  d_ℓ^* ≈ s_ℓ / (2λ_ℓ)
+
+where s_ℓ = ‖P_{W_ℓ} ∇_{a_ℓ} L_new‖² is the gradient signal at layer ℓ (from T6).
+
+The total regularization budget:
+  Λ = Σ_{ℓ=1}^L λ_ℓ
+
+The total forgetting bound at equilibrium:
+  F = Σ_{ℓ=1}^L C_ℓ · √d_ℓ^* = Σ_{ℓ=1}^L C_ℓ · √(s_ℓ / (2λ_ℓ))
+
+## Claims
+
+1. **Optimal per-layer λ under budget constraint.** Minimize F = Σ_ℓ C_ℓ · √(s_ℓ/(2λ_ℓ)) subject to Σ_ℓ λ_ℓ = Λ and λ_ℓ > 0.
+
+   By the method of Lagrange multipliers:
+     ∂F/∂λ_ℓ = -C_ℓ · √s_ℓ / (2√2 · λ_ℓ^{3/2}) = -ν    for all ℓ
+
+   Solving: λ_ℓ ∝ (C_ℓ · √s_ℓ)^{2/3}
+
+   The optimal per-layer weight is:
+     λ_ℓ* = Λ · (C_ℓ · √s_ℓ)^{2/3} / Σ_j (C_j · √s_j)^{2/3}
+
+2. **Simplification when signal is uniform.** If s_ℓ ≈ s for all layers (uniform gradient signal):
+     λ_ℓ* ∝ C_ℓ^{2/3}
+
+   Layers with higher forgetting constants get more regularization.
+
+3. **Simplification when C is uniform.** If C_ℓ ≈ C for all layers (uniform forgetting sensitivity):
+     λ_ℓ* ∝ s_ℓ^{1/3}
+
+   Layers with stronger gradient signal get more regularization (because they drift faster).
+
+4. **Improvement over uniform weighting.** The ratio of forgetting bounds F_optimal / F_uniform satisfies:
+     F_optimal / F_uniform = [Σ_ℓ (C_ℓ √s_ℓ)^{2/3}]^{3/2} / [L^{1/2} · Σ_ℓ C_ℓ √s_ℓ]
+
+   By the power mean inequality, F_optimal ≤ F_uniform always, with equality iff C_ℓ √s_ℓ is constant across layers.
+
+   The improvement is largest when C_ℓ √s_ℓ varies significantly across layers.
+
+5. **Proportional-to-C approximation.** In practice, s_ℓ is harder to estimate than C_ℓ. A simpler rule:
+     λ_ℓ ∝ 1/C_ℓ    (inverse of forgetting constant)
+
+   This is NOT the Lagrange-optimal solution, but it has the right monotonicity: layers that are more sensitive to drift (higher C_ℓ) should receive more regularization (smaller drift tolerance, hence larger λ_ℓ).
+
+   Wait — checking the math: if we want to minimize Σ C_ℓ √d_ℓ and d_ℓ ∝ 1/λ_ℓ, then larger λ_ℓ gives smaller d_ℓ, which we want for large C_ℓ. So we want λ_ℓ large when C_ℓ is large.
+
+   Corrected: λ_ℓ ∝ C_ℓ^{2/3} (proportional to C, not inverse).
+
+6. **Numerical example.** With L = 3 layers, Λ = 0.3 (total budget), and:
+   - Layer 1: C_1 = 0.5, s_1 = 1.0
+   - Layer 2: C_2 = 1.2, s_2 = 0.8
+   - Layer 3: C_3 = 0.3, s_3 = 1.5
+
+   a) Uniform: λ_ℓ = 0.1 each → F_uniform = 0.5·√(0.5) + 1.2·√(0.4) + 0.3·√(0.75) ≈ 0.354 + 0.759 + 0.260 = 1.373
+   b) Compute (C_ℓ √s_ℓ)^{2/3}: (0.5)^{2/3} = 0.630, (1.2·0.894)^{2/3} = (1.073)^{2/3} = 1.048, (0.3·1.225)^{2/3} = (0.367)^{2/3} = 0.511
+   c) Optimal: λ_1 = 0.3·0.630/2.189 = 0.086, λ_2 = 0.3·1.048/2.189 = 0.144, λ_3 = 0.3·0.511/2.189 = 0.070
+   d) F_optimal ≈ 0.5·√(1/(2·0.086)) + 1.2·√(0.8/(2·0.144)) + 0.3·√(1.5/(2·0.070)) ≈ lower than F_uniform

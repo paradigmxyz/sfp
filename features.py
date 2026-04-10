@@ -6,6 +6,8 @@ features.py — Activation hooks, PCA/gradient subspace construction, importance
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import Tensor
 
@@ -291,6 +293,66 @@ def rank_importance(
         importance[j] = max(baseline - score, 0.0)
 
     return importance
+
+
+def estimate_forgetting_constant(
+    drift: Tensor, forgetting: Tensor
+) -> tuple[float, float]:
+    """Estimate the forgetting constant C_ℓ = Cov(F, D) / Var(D) via OLS.
+
+    Args:
+        drift: [n] tensor of subspace drift magnitudes ‖P_W(Δa)‖ per sample
+        forgetting: [n] tensor of forgetting values (Δloss) per sample
+
+    Returns:
+        (C_hat, std_err): OLS slope estimate and its standard error
+    """
+    assert drift.shape == forgetting.shape and drift.dim() == 1
+    n = drift.shape[0]
+
+    var_d = drift.var().item()
+    if var_d < 1e-12:
+        return float("inf"), float("inf")
+
+    cov_fd = ((drift - drift.mean()) * (forgetting - forgetting.mean())).mean().item()
+    C_hat = cov_fd / var_d
+
+    # Residual standard error
+    residuals = forgetting - (C_hat * drift + (forgetting.mean() - C_hat * drift.mean()))
+    residual_var = (residuals**2).sum().item() / max(n - 2, 1)
+    std_err = math.sqrt(residual_var / (n * var_d))
+
+    return C_hat, std_err
+
+
+def davis_kahan_buffer_size(
+    delta_k: float,
+    sigma: float = 1.0,
+    confidence: float = 0.95,
+    target_sin_theta: float = 0.1,
+    clamp_min: int = 128,
+    clamp_max: int = 1024,
+) -> int:
+    """Compute minimum buffer size for PCA subspace estimation via Davis-Kahan.
+
+    n >= (sigma^4 / (c * delta_k^2 * t^2)) * log(2/delta)
+
+    Args:
+        delta_k: eigenvalue gap lambda_k - lambda_{k+1}
+        sigma: sub-Gaussian parameter of activations
+        confidence: 1 - delta (probability of success)
+        target_sin_theta: target principal angle bound t
+        clamp_min: minimum buffer size
+        clamp_max: maximum buffer size
+
+    Returns:
+        Required buffer size, clamped to [clamp_min, clamp_max]
+    """
+    delta = 1.0 - confidence
+    c = 0.5  # universal constant (conservative estimate)
+    log_term = math.log(2.0 / delta)
+    n = (sigma**4 * log_term) / (c * delta_k**2 * target_sin_theta**2)
+    return max(clamp_min, min(clamp_max, math.ceil(n)))
 
 
 def select_top_r(basis: Tensor, importance: Tensor, r: int = 32) -> Tensor:

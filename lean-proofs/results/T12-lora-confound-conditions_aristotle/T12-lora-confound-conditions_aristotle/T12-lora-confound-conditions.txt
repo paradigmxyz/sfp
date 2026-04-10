@@ -1,0 +1,77 @@
+# Theorem T12: LoRA Confound Conditions
+
+## Definitions
+
+**LoRA parametrization.** In LoRA fine-tuning, a weight matrix W ∈ ℝ^{d_out × d_in} is modified as:
+  W' = W_0 + B · A
+
+where A ∈ ℝ^{r_lora × d_in}, B ∈ ℝ^{d_out × r_lora}, and r_lora ≪ min(d_in, d_out).
+
+The activation at a linear layer:
+  a'(x) = W' x = W_0 x + B A x = a_0(x) + B A x
+
+So the activation drift:
+  Δa(x) = a'(x) - a_0(x) = B A x
+
+**SFP subspace.** Let W_SFP ⊂ ℝ^{d_out} be the r_sfp-dimensional preservation subspace (PCA basis).
+
+The projected drift:
+  P_{W_SFP}(Δa(x)) = P_{W_SFP} B A x
+
+**LoRA image subspace.** The drift Δa = B A x lies in:
+  im(B) ⊂ ℝ^{d_out}
+
+which has dimension at most r_lora.
+
+Define:
+  r_lora — LoRA rank
+  r_sfp — SFP preservation subspace dimension
+  W_lora = im(B) — the LoRA image subspace (dim ≤ r_lora)
+
+## Claims
+
+1. **Drift dimension bound.** Under LoRA, the activation drift at any layer is confined to a subspace of dimension at most r_lora:
+     Δa(x) ∈ im(B) for all inputs x
+     dim(im(B)) ≤ r_lora
+
+   Prove: Δa(x) = B(Ax), which is a linear combination of columns of B. The span of all possible Δa(x) is im(B).
+
+2. **H1 is trivially true when r_lora ≤ r_sfp and im(B) ⊆ W_SFP.** If the LoRA image is contained in the SFP subspace:
+     P_{W_SFP}(Δa) = Δa    and    P_{W_SFP^⊥}(Δa) = 0
+
+   Then the full drift is captured by the preservation subspace, and H1 holds with any C > 0 because the drift is zero in the orthogonal complement. The bound:
+     forgetting ≤ C · ‖P_{W_SFP}(Δa)‖ = C · ‖Δa‖
+
+   is vacuously satisfied — it says "preserving the full drift bounds forgetting," which is trivially true regardless of the subspace structure.
+
+3. **Confound condition.** H1 measured under LoRA is uninformative about true feature structure when:
+     r_lora ≤ r_sfp    AND    ‖P_{W_SFP} P_{W_lora} - P_{W_lora}‖_op < ε
+
+   (the LoRA subspace is nearly contained in the SFP subspace).
+
+   In this regime:
+   a) ‖P_{W_SFP^⊥}(Δa)‖ ≤ ε · ‖Δa‖ (negligible orthogonal drift)
+   b) The R² from T1 (drift predicting forgetting) approaches 1.0 automatically
+   c) This high R² is an artifact of low-rank confinement, not evidence of meaningful feature structure
+
+4. **Diagnostic: LoRA rank vs SFP rank.** Define the confound severity:
+     κ = min(1, r_lora / r_sfp) · ‖P_{W_SFP} P_{W_lora}‖_F² / min(r_lora, r_sfp)
+
+   When κ ≈ 1: LoRA confound is severe — SFP results under LoRA are uninterpretable.
+   When κ ≈ 0: LoRA subspace is orthogonal to SFP subspace — SFP is genuinely measuring feature preservation.
+
+   For the confound to be absent, need either:
+   a) r_lora > r_sfp (LoRA rank exceeds SFP rank — drift has degrees of freedom outside W_SFP)
+   b) im(B) ⊥ W_SFP (LoRA modifies orthogonal directions — unlikely in practice)
+   c) Full fine-tuning (r_lora = d — no rank constraint)
+
+5. **Full fine-tuning as gold standard.** Under full fine-tuning, Δa(x) is unconstrained (can be any vector in ℝ^{d_out}). Therefore:
+     If R² ≈ 1 under full fine-tuning, H1 is genuinely validated
+     If R² ≈ 1 only under LoRA but R² ≪ 1 under full fine-tuning, H1 was an artifact
+
+   This is the diagnostic: compare R² between LoRA and full fine-tuning experiments.
+
+6. **Quantitative threshold.** The LoRA confound is negligible when:
+     r_lora ≥ 2 · r_sfp    (LoRA has at least 2× the degrees of freedom of SFP)
+
+   Prove: when r_lora = 2r_sfp, even if r_sfp dimensions of im(B) lie in W_SFP, the remaining r_sfp dimensions lie in W_SFP^⊥, providing sufficient out-of-subspace drift to test H1 non-trivially.

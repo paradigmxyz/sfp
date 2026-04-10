@@ -1,0 +1,81 @@
+# Theorem T13: Harmonic Mean Scorer Properties
+
+## Definitions
+
+Let R ∈ [0, 1] be the retention score (fraction of old-task performance preserved).
+Let P ∈ [0, 1] be the plasticity score (fraction of new-task performance achieved).
+
+The **harmonic mean scorer**:
+  H(R, P) = 2RP / (R + P)     when R + P > 0
+  H(0, 0) = 0
+
+This is the F1-score formula applied to retention and plasticity.
+
+Alternative scorers considered:
+  Arithmetic mean: A(R, P) = (R + P) / 2
+  Geometric mean: G(R, P) = √(RP)
+  Weighted linear: W(R, P) = αR + (1-α)P
+
+**Properties of interest:**
+  (P1) Zero forcing: H(R, P) = 0 iff R = 0 or P = 0
+  (P2) Symmetry: H(R, P) = H(P, R)
+  (P3) Monotonicity: H is increasing in both R and P
+  (P4) Scale: H(1, 1) = 1
+
+**Nash bargaining solution.** Consider two agents:
+  Agent S (stability): wants to maximize R
+  Agent P (plasticity): wants to maximize P
+  Disagreement point: (R_d, P_d) = (0, 0) (if no agreement, both get 0)
+
+The Nash bargaining solution maximizes: (R - R_d)(P - P_d) = RP subject to the Pareto frontier constraint.
+
+## Claims
+
+1. **Uniqueness of harmonic mean (axiomatic).** The harmonic mean H(R,P) = 2RP/(R+P) is the unique function (up to monotone transformation) satisfying all four properties (P1)-(P4) AND the additional property:
+   (P5) **Equal marginal rates at R = P.** When R = P, a small improvement in R has the same value as a small improvement in P:
+     ∂H/∂R |_{R=P} = ∂H/∂P |_{R=P}
+
+   Prove: (P2) implies (P5) by symmetry (the gradient must be symmetric at R=P). Among the family of generalized means M_p(R,P) = ((R^p + P^p)/2)^{1/p}, the only one satisfying (P1) is p = -1 (harmonic mean), because:
+   - p > 0 (power means): M_p(0, P) = (P^p/2)^{1/p} > 0, violating (P1)
+   - p = 0 (geometric): G(0, P) = 0 ✓ but G is a limit, not an explicit mean
+   - p = -1 (harmonic): H(0, P) = 0 ✓
+
+   So among power means, harmonic is the unique (P1)-satisfying member.
+
+2. **Failure of arithmetic mean.** The arithmetic mean A(R, P) = (R+P)/2 violates (P1):
+     A(0, 1) = 0.5 > 0
+
+   This means a model with zero retention (complete forgetting) scores 0.5 if it achieves perfect plasticity. This is undesirable — a model that forgets everything should score 0.
+
+3. **Geometric mean comparison.** The geometric mean G(R, P) = √(RP) also satisfies (P1):
+     G(0, P) = 0 ✓
+
+   But G is less sensitive to imbalance than H. Specifically:
+     H(R, P) ≤ G(R, P) ≤ A(R, P) for all R, P ≥ 0
+
+   The harmonic mean penalizes imbalance more strongly, making it the strictest scorer.
+
+   Prove the ordering: by the AM-HM inequality, H ≤ G ≤ A. Equality iff R = P.
+
+4. **Nash bargaining equivalence.** The Nash bargaining solution with disagreement point (0, 0) on the Pareto frontier {(R, P) : f(R, P) = 0} maximizes RP.
+
+   On a linear Pareto frontier R + P = c (constant tradeoff), the Nash solution is R* = P* = c/2, achieving H(R*, P*) = c/2.
+
+   More generally, the Nash solution maximizes RP, and H(R,P) = 2RP/(R+P) is a monotone transformation of RP/(R+P). Therefore:
+     argmax H(R, P) = argmax RP    on any convex Pareto frontier.
+
+   This means maximizing the harmonic mean scorer is equivalent to finding the Nash bargaining solution between stability and plasticity.
+
+5. **Sensitivity analysis.** The elasticity of H with respect to the weaker dimension:
+     If R < P: ∂log(H)/∂log(R) = 2P²/(R+P)² > 2R²/(R+P)² = ∂log(H)/∂log(P)
+
+   The harmonic mean is more sensitive to improvements in the weaker score. This incentivizes balanced approaches over specialization.
+
+   Quantitatively: at (R, P) = (0.5, 0.9), a 10% improvement in R increases H by ~12%, while a 10% improvement in P increases H by only ~3%.
+
+6. **Comparison to weighted linear scorer.** The SFP leaderboard previously used W(R, P) = 0.6R + 0.4P. This violates (P1):
+     W(0, 1) = 0.4 > 0
+
+   The harmonic mean is strictly preferable under the axioms (P1)-(P5). The switch to harmonic mean changes the optimal operating point:
+   - Under W: optimal to sacrifice R for P (asymmetric weights favor plasticity)
+   - Under H: optimal at R ≈ P (balanced retention and plasticity)

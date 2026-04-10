@@ -1,0 +1,56 @@
+# Theorem T3: Conditional H1 Under Exponential Family
+
+## Definitions
+
+Let a_ℓ(θ; x) ∈ ℝ^d be the activation at layer ℓ of a neural network with parameters θ on input x.
+
+Let W ⊂ ℝ^d be a subspace of dimension r, and P_W the orthogonal projection onto W.
+
+Define the old-task loss function:
+  L_old(θ) = E_x[ℓ(f(θ; x), y)]
+
+**Exponential family assumption.** The conditional distribution of activations given the old-task sufficient statistics belongs to an exponential family:
+  p(a_ℓ | x) = h(a_ℓ) · exp(η(x)^T T(a_ℓ) - A(η(x)))
+
+where:
+  η(x) ∈ ℝ^m is the natural parameter (depends on input x and upstream layers)
+  T(a_ℓ) ∈ ℝ^m is the sufficient statistic
+  h(a_ℓ) is the base measure
+  A(η) is the log-partition function
+
+**Hypothesis H1 (SFP core hypothesis).** There exist subspaces W_1, ..., W_L and a constant C > 0 such that for all θ near θ_0:
+  |L_old(θ) - L_old(θ_0)| ≤ C · Σ_ℓ ‖P_{W_ℓ}(a_ℓ(θ) - a_ℓ(θ_0))‖
+
+Define:
+  P_{W^⊥} = I - P_W   (projection onto orthogonal complement)
+
+## Claims
+
+1. **Sufficiency of projected activations.** If a_ℓ follows an exponential family distribution with sufficient statistic T(a_ℓ), and if T(a_ℓ) = P_W(a_ℓ) for some subspace W (i.e., the sufficient statistic is a linear projection), then:
+     L_old(θ) = E_x[g(P_W(a_ℓ(θ; x)))]
+   for some function g. That is, the old-task loss depends on activations only through P_W(a_ℓ).
+
+   Prove via: the Neyman-Fisher factorization theorem — the likelihood factors through the sufficient statistic, so any loss function that depends on the likelihood depends only on T(a_ℓ) = P_W(a_ℓ).
+
+2. **H1 as a consequence.** Under the exponential family assumption with linear sufficient statistic T(a_ℓ) = P_W(a_ℓ), H1 holds with:
+     |L_old(θ) - L_old(θ_0)| ≤ C · ‖P_W(a_ℓ(θ) - a_ℓ(θ_0))‖
+   where C = sup_{a} ‖∇_a g(a)‖ (Lipschitz constant of g).
+
+   Prove via: Claim 1 gives L_old depends only on P_W(a_ℓ). Then apply the mean value theorem:
+     |g(P_W(a_ℓ(θ))) - g(P_W(a_ℓ(θ_0)))| ≤ ‖∇g‖_∞ · ‖P_W(a_ℓ(θ) - a_ℓ(θ_0))‖
+
+3. **Orthogonal complement irrelevance.** Under the same assumptions, the component P_{W^⊥}(a_ℓ) does not affect the old-task loss:
+     ∂L_old / ∂(P_{W^⊥}(a_ℓ)) = 0
+
+   This means fine-tuning can freely modify the orthogonal complement without increasing forgetting.
+
+4. **Diagnostic test.** The exponential family assumption can be tested empirically. Given samples {(x_i, a_ℓ(θ_0; x_i))}_{i=1}^n, compute:
+     R² = 1 - Var(L_old | P_W(a_ℓ)) / Var(L_old)
+
+   If R² ≈ 1, the projection captures nearly all loss-relevant information, consistent with the exponential family assumption. If R² is low, H1 may not hold at this layer.
+
+   Formally: R² = 1 implies P_W(a_ℓ) is sufficient. R² < 1 - ε implies a fraction ε of loss variance is unexplained by P_W(a_ℓ), violating strong sufficiency.
+
+5. **Multi-layer extension.** For L layers, if each layer independently satisfies the exponential family condition with subspace W_ℓ, then H1 holds jointly:
+     |L_old(θ) - L_old(θ_0)| ≤ Σ_ℓ C_ℓ · ‖P_{W_ℓ}(a_ℓ(θ) - a_ℓ(θ_0))‖
+   where C_ℓ = sup ‖∇_{a_ℓ} g_ℓ‖ and g_ℓ captures the contribution of layer ℓ.

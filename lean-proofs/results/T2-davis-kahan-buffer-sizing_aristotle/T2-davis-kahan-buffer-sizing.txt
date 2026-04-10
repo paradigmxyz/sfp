@@ -1,0 +1,56 @@
+# Theorem T2: Davis-Kahan Perturbation Bound for PCA Subspace Estimation
+
+## Definitions
+
+Let Σ ∈ ℝ^{d×d} be the population covariance matrix of activations at a given layer, with eigenvalues λ_1 ≥ λ_2 ≥ ... ≥ λ_d ≥ 0.
+
+Let Σ̂ = (1/n) Σ_{i=1}^n (a_i - ā)(a_i - ā)^T be the sample covariance from n i.i.d. samples.
+
+Let W = span(v_1, ..., v_k) be the population top-k eigenspace (PCA subspace).
+Let Ŵ = span(v̂_1, ..., v̂_k) be the sample top-k eigenspace.
+
+Define the eigenvalue gap:
+  Δ_k = λ_k - λ_{k+1}
+
+Define the principal angle between subspaces:
+  sin(θ(Ŵ, W)) = ‖P_Ŵ - P_W‖_op
+
+where P_Ŵ, P_W are orthogonal projections and ‖·‖_op is the operator norm.
+
+## Claims
+
+1. **Davis-Kahan sin(θ) theorem.** If Δ_k > 0, then:
+     sin(θ(Ŵ, W)) ≤ ‖Σ̂ - Σ‖_op / Δ_k
+
+2. **Sample covariance concentration.** For d-dimensional sub-Gaussian activations with parameter σ, when n ≥ d:
+     P(‖Σ̂ - Σ‖_op > ε) ≤ 2 exp(-c · n · ε² / σ⁴)
+
+   for a universal constant c > 0. Combined with Davis-Kahan:
+     P(sin(θ(Ŵ, W)) > t) ≤ 2 exp(-c · n · (t · Δ_k)² / σ⁴)
+
+3. **Minimum buffer size.** For the PCA subspace estimate to satisfy sin(θ) ≤ t with probability ≥ 1 - δ:
+     n ≥ (σ⁴ / (c · Δ_k² · t²)) · log(2/δ)
+
+   When t = 0.1 (subspace angle < ~5.7°):
+     n ≥ 100 · σ⁴ · log(2/δ) / (c · Δ_k²)
+
+4. **Preservation loss error from subspace misestimation.** If the true preservation loss is:
+     L_pres = ‖P_W(Δa)‖²
+   and we use the estimated subspace:
+     L̂_pres = ‖P_Ŵ(Δa)‖²
+   then:
+     |L̂_pres - L_pres| ≤ 2 · sin(θ(Ŵ, W)) · ‖Δa‖²
+
+   Prove via: ‖P_Ŵ(x) - P_W(x)‖ ≤ sin(θ) · ‖x‖ (projection perturbation).
+
+5. **Numerical verification.** With parameters:
+   - d = 1536 (Qwen2.5-1.5B hidden dim)
+   - k = 128 (PCA components)
+   - n = 128 (default buffer size)
+   - σ = 1.0 (assume standardized activations)
+   - δ = 0.05
+
+   a) For the bound to give sin(θ) ≤ 0.1, need Δ_k ≥ 10 · σ² · √(log(40) / (c · 128))
+   b) If Δ_{128} ≈ 0.01 (typical eigenvalue gap at k=128 for LLM activations), compute the actual sin(θ) bound
+   c) If sin(θ) > 0.3 with n=128, then the default buffer is provably insufficient
+   d) Compute n_required for sin(θ) ≤ 0.1 with this Δ_k

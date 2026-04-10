@@ -331,6 +331,26 @@ sfp_random_selection_loss.SETUP = "sfp"
 
 
 # ---------------------------------------------------------------------------
+# Information-theoretic SFP (theory-driven layer selection)
+# ---------------------------------------------------------------------------
+
+
+def information_theoretic_sfp_loss(
+    model,
+    batch: dict,
+    memory_batch: dict | None = None,
+    basis: dict | None = None,
+    anchor_acts: dict | None = None,
+    lam: float = 0.1,
+    **kw,
+) -> Tensor:
+    """SFP loss with theory-selected layers. Same preservation formula as sfp_loss."""
+    return _sfp_loss_impl(model, batch, memory_batch, basis, anchor_acts, lam, **kw)
+
+information_theoretic_sfp_loss.SETUP = "information_theoretic_sfp"
+
+
+# ---------------------------------------------------------------------------
 # Setup functions (called at task boundaries)
 # ---------------------------------------------------------------------------
 
@@ -384,6 +404,11 @@ def method_setup(
         result = sfp_setup(model, tokenizer, memory_buffers, **kw)
     elif setup_key == "sfp_grad":
         result = sfp_grad_setup(model, tokenizer, memory_buffers, **kw)
+    elif setup_key == "information_theoretic_sfp":
+        result = information_theoretic_sfp_setup(
+            model, tokenizer, memory_buffers,
+            k=kw.get("k", 128), r=kw.get("r", 32),
+        )
     else:
         result = {}
 
@@ -493,6 +518,74 @@ def sfp_grad_setup(
     return {"basis": basis, "anchor_acts": anchor_acts}
 
 
+def information_theoretic_sfp_setup(
+    model,
+    tokenizer,
+    memory_buffers: dict,
+    layers: list[str] | None = None,
+    k: int = 128,
+    r: int = 32,
+    **kw,
+) -> dict:
+    """SFP setup with theory-driven layer selection by variance concentration.
+
+    Instead of probing at fixed relative depths [0.25, 0.5, 0.75], probes many
+    layers and selects the 3 where top-r PCA captures the highest variance ratio
+    (proxy for smallest forgetting constant C_ℓ).
+    """
+    from features import (
+        build_pca_basis,
+        collect_activations,
+        get_layer_names,
+        select_top_r,
+    )
+
+    # Flatten memory buffers
+    mem_samples: list[dict] = []
+    for samples in memory_buffers.values():
+        if isinstance(samples, list):
+            mem_samples.extend(samples)
+
+    if not mem_samples:
+        return {"basis": {}, "anchor_acts": {}}
+
+    # Probe at many relative positions instead of fixed 3
+    n_layers_to_probe = 12
+    positions = [i / n_layers_to_probe for i in range(1, n_layers_to_probe)]
+    candidate_layers = get_layer_names(model, positions=positions)
+
+    # Collect activations at all candidate layers
+    all_acts = collect_activations(model, mem_samples, tokenizer, candidate_layers)
+
+    # Score each layer by explained variance ratio of top-r
+    layer_scores: dict[str, float] = {}
+    layer_bases: dict[str, tuple] = {}
+    for layer_name in candidate_layers:
+        acts = all_acts[layer_name]
+        u, explained_var = build_pca_basis(acts, k=k)
+
+        total_var = explained_var.sum().item()
+        top_r_var = explained_var[:r].sum().item()
+        var_ratio = top_r_var / max(total_var, 1e-12)
+
+        layer_scores[layer_name] = var_ratio
+        layer_bases[layer_name] = (u, explained_var)
+
+    # Select top-3 layers with HIGHEST variance ratio
+    selected = sorted(layer_scores, key=layer_scores.get, reverse=True)[:3]
+
+    basis: dict[str, Tensor] = {}
+    anchor_acts: dict[str, Tensor] = {}
+    for layer_name in selected:
+        u, explained_var = layer_bases[layer_name]
+        u_r = select_top_r(u, explained_var, r=r)
+        basis[layer_name] = u_r
+        acts = all_acts[layer_name]
+        anchor_acts[layer_name] = (acts.float() @ u_r).detach()
+
+    return {"basis": basis, "anchor_acts": anchor_acts}
+
+
 # ---------------------------------------------------------------------------
 # Method registry
 # ---------------------------------------------------------------------------
@@ -507,4 +600,5 @@ METHODS: dict[str, Callable] = {
     "sfp_grad": sfp_grad_loss,
     "sfp_random_basis": sfp_random_basis_loss,
     "sfp_random_selection": sfp_random_selection_loss,
+    "information_theoretic_sfp": information_theoretic_sfp_loss,
 }

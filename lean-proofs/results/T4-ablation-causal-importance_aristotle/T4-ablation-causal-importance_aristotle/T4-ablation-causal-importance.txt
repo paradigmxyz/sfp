@@ -1,0 +1,70 @@
+# Theorem T4: Ablation Importance Equals Causal Importance
+
+## Definitions
+
+Let a ∈ ℝ^d be the activation vector at a given layer, and let {e_1, ..., e_d} be an orthonormal basis (e.g., PCA directions).
+
+Decompose the activation:
+  a = Σ_{i=1}^d α_i e_i     where α_i = ⟨a, e_i⟩
+
+Define the old-task loss as a function of the components:
+  L_old = f(α_1, ..., α_d)
+
+**Ablation importance** of direction i:
+  I_abl(i) = f(α_1, ..., α_d) - f(α_1, ..., α_{i-1}, 0, α_{i+1}, ..., α_d)
+  (loss change when component i is zeroed out)
+
+**Causal importance** of direction i (true contribution to loss):
+  I_causal(i) = f(α_1, ..., α_d) - f(α_1, ..., α_{i-1}, 0, α_{i+1}, ..., α_d)
+  when all components are independently distributed.
+
+More precisely, the Shapley value of direction i is:
+  φ_i = Σ_{S ⊆ [d]\{i}} [|S|!(d-|S|-1)!/d!] · [f(S ∪ {i}) - f(S)]
+
+where f(S) denotes the loss when only components in S are present (others zeroed).
+
+**Assumption M (Monotonicity).** For all subsets S and directions i:
+  f(S ∪ {i}) ≥ f(S)
+  (adding any direction can only improve or maintain loss — more information helps)
+
+**Assumption A (Additivity).** The loss decomposes additively:
+  f(α_1, ..., α_d) = g_0 + Σ_{i=1}^d g_i(α_i)
+  for some functions g_0, g_1, ..., g_d.
+
+## Claims
+
+1. **Ablation equals marginal contribution under additivity.** Under Assumption A:
+     I_abl(i) = g_i(α_i) - g_i(0) = g_i(α_i)   (assuming g_i(0) = 0 by normalization)
+
+   The ablation importance of direction i equals its individual contribution g_i(α_i), independent of all other components.
+
+2. **Ablation ranking equals Shapley ranking under additivity.** Under Assumption A, the Shapley value of direction i is:
+     φ_i = g_i(α_i)
+
+   Prove via: when f is additive, f(S ∪ {i}) - f(S) = g_i(α_i) for all S, so the Shapley sum collapses to g_i(α_i).
+
+   Consequence: I_abl(i) = φ_i, so ablation ranking is the unique fair ranking.
+
+3. **Monotonicity ensures ablation is non-negative.** Under Assumption M:
+     I_abl(i) ≥ 0 for all i
+
+   Proof: f(α_1, ..., α_d) ≥ f(α_1, ..., 0_i, ..., α_d) by monotonicity with S = {1,...,d}\{i}.
+
+4. **Optimal top-r selection under additivity + monotonicity.** Let r < d. The set S* = argmax_{|S|=r} Σ_{i∈S} I_abl(i) minimizes the loss from projection onto the r-dimensional subspace span({e_i : i ∈ S*}).
+
+   Formally: under Assumptions A and M,
+     S* = argmin_{|S|=r} [f(α_1,...,α_d) - f_S(α)]
+   where f_S zeros out components not in S. The solution is to select the r directions with largest I_abl(i).
+
+5. **Failure without additivity.** Without Assumption A, construct a counterexample where ablation ranking differs from the optimal top-r selection:
+   - Let d = 3, r = 1
+   - f(α_1, α_2, α_3) = α_1 + α_2 + 10 · α_1 · α_2 (interaction term)
+   - I_abl(1) ≈ I_abl(2) (both have similar marginal contribution)
+   - But the optimal single direction depends on the interaction — selecting both together would be worth far more than their individual ablation scores suggest.
+
+   Prove: there exist functions f and activation distributions such that the ablation-top-r set is suboptimal by a factor of Ω(d).
+
+6. **Practical diagnostic.** Additivity can be tested by checking pairwise interactions:
+     I_inter(i,j) = f({i,j}) - f({i}) - f({j}) + f(∅)
+
+   If max_{i,j} |I_inter(i,j)| / max_i |I_abl(i)| < ε, then additivity holds approximately and ablation ranking is approximately optimal with error at most O(d² · ε).

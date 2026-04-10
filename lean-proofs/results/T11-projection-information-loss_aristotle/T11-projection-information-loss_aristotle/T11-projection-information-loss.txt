@@ -1,0 +1,71 @@
+# Theorem T11: Projection Information Loss (Rate-Distortion Bound)
+
+## Definitions
+
+Let a ∈ ℝ^d be the activation vector at a given layer, with covariance Σ = E[(a-μ)(a-μ)^T].
+
+Let Σ have eigenvalues λ_1 ≥ λ_2 ≥ ... ≥ λ_d ≥ 0 with eigenvectors v_1, ..., v_d.
+
+Let W = span(v_1, ..., v_r) be the top-r PCA subspace, and P_W the orthogonal projection.
+
+Define:
+  Y — the old-task output (label or next token)
+  I(Y; a) — mutual information between Y and the full activation
+  I(Y; P_W(a)) — mutual information between Y and the projected activation
+
+**Task-relevant information** retained by the projection:
+  I_retained = I(Y; P_W(a))
+  I_lost = I(Y; a) - I(Y; P_W(a))
+
+By the data processing inequality: I(Y; P_W(a)) ≤ I(Y; a), so I_lost ≥ 0.
+
+## Claims
+
+1. **Information loss bound (Gaussian case).** If a ~ N(μ, Σ) and Y = w^T a + ε where ε ~ N(0, σ²) independent of a, then:
+     I(Y; a) - I(Y; P_W(a)) = (1/2) · log(1 + ‖P_{W^⊥} w‖² · ‖P_{W^⊥} Σ P_{W^⊥}‖ / σ²)
+
+   When the task-relevant direction w lies mostly in W:
+     I_lost ≤ (1/2) · log(1 + ‖P_{W^⊥} w‖² · λ_{r+1} / σ²)
+
+   Prove via: under Gaussian assumptions, mutual information has a closed form I(Y; a) = (1/2)log(1 + w^T Σ w / σ²), and I(Y; P_W(a)) = (1/2)log(1 + w^T P_W Σ P_W w / σ²). The difference involves the component of w in the discarded subspace.
+
+2. **Rate-distortion interpretation.** The projection P_W is a rate-constrained encoder with:
+   - Rate: R = r · log(σ_max) bits (r dimensions, each with bounded dynamic range)
+   - Distortion: D = E[‖a - P_W(a)‖²] = Σ_{i=r+1}^d λ_i
+
+   The rate-distortion function for Gaussian sources:
+     R(D) = (1/2) Σ_{i=1}^d max(0, log(λ_i / θ))
+
+   where θ is chosen so Σ_i min(λ_i, θ) = D.
+
+   PCA projection achieves the rate-distortion bound when θ = λ_{r+1} (the projection discards exactly the components below the threshold).
+
+3. **Task-relevant rate-distortion bound.** The information retained about Y satisfies:
+     I(Y; P_W(a)) ≥ I(Y; a) - r_lost
+
+   where:
+     r_lost = (1/2) · Σ_{i=r+1}^d log(1 + γ_i · λ_i / σ²)
+
+   and γ_i = (v_i^T ∇_a E[Y|a])² / ‖∇_a E[Y|a]‖² measures how much of the task-relevant gradient lies in direction i.
+
+   If the task-relevant gradient is concentrated in the top-r PCA directions (γ_i ≈ 0 for i > r):
+     r_lost ≈ 0
+
+4. **Minimum r for target information retention.** To retain at least (1-ε) fraction of task information:
+     I(Y; P_W(a)) ≥ (1-ε) · I(Y; a)
+
+   sufficient condition:
+     r ≥ d - |{i : λ_i < σ² · ε · I(Y;a) / ((d-r) · γ_max)}|
+
+   In the typical regime where eigenvalues decay rapidly (power law λ_i ~ i^{-α}):
+     r_min = O((σ² / (ε · I(Y;a) · γ_max))^{1/α})
+
+5. **Connection to explained variance.** The explained variance ratio ρ(r) = Σ_{i=1}^r λ_i / Σ_{i=1}^d λ_i is an upper bound on the fraction of task information retained:
+     I(Y; P_W(a)) / I(Y; a) ≤ f(ρ(r))
+
+   where f depends on the alignment between task direction and PCA directions.
+
+   When task-relevant directions align with high-variance directions (typical for overparameterized networks):
+     I(Y; P_W(a)) / I(Y; a) ≈ ρ(r)
+
+   This justifies the use of explained variance as a proxy for information retention in SFP's top-r selection.
