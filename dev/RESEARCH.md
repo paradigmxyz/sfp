@@ -276,3 +276,59 @@ Given the GPU retest partial pass (2/3 gate checks), the pivot decision is:
 1. Gradient basis comparison — does gradient-informed basis produce even stronger causal signal?
 2. Full baseline benchmark with SFP vs all methods
 3. Paper updated with 1.5B causal results (Table 3, Section 4.3)
+
+### 2026-04-10 — SFP-EWC-DER: Addressing Threats to Validity
+
+**Goal**: Design a submission that directly responds to the paper's own stated threats to validity
+(LoRA confound, layer selection sensitivity, task-order robustness) using literature-backed methods.
+
+**Literature review** (4 parallel research agents, 2023–2026 continual learning papers):
+
+| Finding | Source |
+|---------|--------|
+| DER++ (CE + logit distillation on memory) consistently beats vanilla replay | Buzzega et al., NeurIPS 2020 (arXiv:2004.07211) |
+| Optimal replay ratio ≈ 1:1 (not 0.2–0.55) | TiC-LM (arXiv:2505.12512), Watch Your Step (arXiv:2404.10758) |
+| Convex mixing `(1-r)*L_new + r*L_mem` hurts plasticity vs additive | Harmonic mean analysis: cutting new-task gradient at r=0.5 depresses plasticity |
+| EWC-LoRA on adapter weights: ~8.9% improvement over vanilla LoRA | Zheng et al., ICLR 2026 (arXiv:2602.17559) |
+| O-LoRA (orthogonal subspaces) beats replay in T5 benchmarks | Wang et al., EMNLP 2023 (arXiv:2310.14152) |
+
+**Threat analysis**:
+
+| Threat (from paper website) | Response in sfp_ewc_der |
+|-----------------------------|-------------------------|
+| LoRA confound: forgetting may be a LoRA artifact | EWC-LoRA term: `0.10 * MSE(theta, theta_star)` over LoRA A/B — retention in parameter space |
+| Layer selection: fixed 1/4, 1/2, 3/4 may be suboptimal | SFP weight reduced to 0.05; EWC + logit + CE_mem provide retention independent of layer choice |
+| Task-order sensitivity | Additive terms symmetric across orderings; no curriculum assumption |
+
+**Method: SFP-EWC-DER** (`submissions/sfp_ewc_der.py`):
+
+```
+L = L_new                                  (weight 1.0, never diluted)
+  + 0.50 * CE(model(x_mem), y_mem)         (output retention, ~1:1 ratio)
+  + 0.20 * MSE(logits_now, logits_stored)  (DER++ dark experience)
+  + 0.05 * SFP_preserve                   (geometric retention, 3 layers)
+  + 0.10 * EWC_LoRA                        (LoRA weight anchor)
+```
+
+Key design: **fully additive** (not convex mix). The adaptive convex-mix approach
+`(1-r)*L_new + r*L_mem` halves the new-task gradient at r=0.5, directly hurting
+the plasticity axis of the harmonic mean score.
+
+**Comparison to baselines** (theoretical, from literature; GPU benchmark pending):
+
+| Method | Retention mechanism | Plasticity protection | Expected HM |
+|--------|--------------------|-----------------------|-------------|
+| naive  | none               | full                  | ~0.40–0.55  |
+| replay | CE on memory only  | diluted by ratio      | ~0.65–0.68  |
+| SFP (0.71) | geometric subspace | full (no mem CE) | 0.71 |
+| sfp_ewc_der | geo + CE_mem + DER++ + EWC-LoRA | full (additive) | **0.74–0.78** (est.) |
+
+Estimate based on: DER++ typically +0.02–0.04 over vanilla replay; EWC-LoRA +0.03–0.05
+over vanilla LoRA (Zheng et al.); combined additive stack expected +0.04–0.07 over SFP.
+
+**Unit tests**: 6 tests pass in ~2s (no GPU needed). See `scripts/test_submissions.py`.
+
+**Gate check**: Method satisfies all leaderboard rules (single `_loss` function, SETUP="sfp",
+< 10KB, uses only allowed imports). GPU benchmark needed for final score.
+
+**Status**: SUBMITTED — awaiting GPU evaluation via leaderboard.
