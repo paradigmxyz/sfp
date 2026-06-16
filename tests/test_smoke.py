@@ -25,7 +25,10 @@ def test_method_registry():
     from methods import METHODS
 
     expected = {"naive", "replay", "distill", "hidden_distill", "orthogonal", "sfp",
-                "sfp_grad", "sfp_random_basis", "sfp_random_selection"}
+                "sfp_grad", "sfp_random_basis", "sfp_random_selection",
+                "forgetting_curve", "forgetting_curve_dist",
+                "forgetting_curve_sharp", "forgetting_curve_replay",
+                "forgetting_curve_soft"}
     assert expected == set(METHODS.keys())
 
 

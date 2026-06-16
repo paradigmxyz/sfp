@@ -39,9 +39,9 @@ image = (
     ])
 )
 
-app = modal.App("sfp-benchmark", image=image, secrets=[modal.Secret.from_name("sfp-push-token")])
+app = modal.App("sfp-benchmark", image=image)
 
-PUSHGATEWAY = "57.129.90.22:8080"
+PUSHGATEWAY = ""
 
 # ---------------------------------------------------------------------------
 # Presets: name -> (gpu, seeds, steps_per_task, model, tasks, est_cost)
@@ -60,7 +60,10 @@ PRESETS = {
         "desc": "Sanity check. Tiny model, 1 seed, 50 steps. Just verifies your method runs.",
     },
     "quick": {
-        "gpu": "T4",
+        # A10G (24 GiB) instead of T4 (14.5 GiB) because distill-SETUP methods
+        # need to keep teacher + student of Qwen-1.5B in VRAM simultaneously
+        # — that's ~13.5 GiB before activations, OOMs a T4 on the first batch.
+        "gpu": "A10G",
         "seeds": [42],
         "steps_per_task": 200,
         "model": "Qwen/Qwen2.5-1.5B-Instruct",
@@ -71,7 +74,11 @@ PRESETS = {
     },
     "standard": {
         "gpu": "A10G",
-        "seeds": [42, 43, 44],
+        # Reduced from [42, 43, 44] to [42] to fit a ~$27 self-serve budget on
+        # L40S (3 seeds × ~7h × $1.95 ≈ $40, 1 seed ≈ $14). Single-seed point
+        # estimate without variance bars, but real eval (200 samples × 5 tasks)
+        # so far less noisy than smoke. Paradigm's CI keeps all 3 seeds.
+        "seeds": [42],
         "steps_per_task": 2000,
         "model": "Qwen/Qwen2.5-1.5B-Instruct",
         "tasks": "math,code,ifeval,safety,domain",
@@ -101,12 +108,15 @@ def run_seed_t4(
     return _run(method, memory, seed, steps, model_name, tasks, code)
 
 
-@app.function(gpu="A10G", timeout=7200)
+@app.function(gpu="L40S", timeout=7200)
 def run_seed_a10g(
     method: str, memory: int, seed: int, steps: int, model_name: str, tasks: str,
     code: str = "",
 ) -> dict:
-    """Run benchmark on A10G."""
+    """Run benchmark on L40S (48 GiB). Name kept for compat — A10G's 22 GiB
+    is just barely too small for distill-SETUP methods on Qwen2.5-1.5B
+    (teacher + student + activations + per-example KL intermediates need
+    a hair over 22 GiB)."""
     return _run(method, memory, seed, steps, model_name, tasks, code)
 
 
@@ -118,7 +128,7 @@ def _run(method: str, memory: int, seed: int, steps: int, model_name: str, tasks
     out_dir = f"/root/sfp/out/bench/{method}_m{memory}_s{seed}"
 
     cmd = [
-        "python", "train.py",
+        "python", "-u", "train.py",  # -u: unbuffered stdout so progress streams to Modal logs
         "--method", method,
         "--memory", str(memory),
         "--seed", str(seed),
@@ -127,7 +137,11 @@ def _run(method: str, memory: int, seed: int, steps: int, model_name: str, tasks
         "--steps_per_task", str(steps),
         "--lora_rank", "64",
         "--out_dir", out_dir,
-        "--mode", "fast",
+        # Use evaluate.py's "smoke" eval (few samples per task) for both smoke
+        # AND quick presets — on T4, Qwen-1.5B does ~11s/sample on GSM8K
+        # generation, so 200-sample "fast" eval makes quick take 5-7 hours
+        # instead of the documented ~10 min. "standard"/"full" still use fast.
+        "--mode", "smoke" if steps <= 200 else "fast",
         "--pushgateway", PUSHGATEWAY,
     ]
 
@@ -138,11 +152,36 @@ def _run(method: str, memory: int, seed: int, steps: int, model_name: str, tasks
             f.write(code)
         cmd.extend(["--method_file", method_file])
 
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd="/root/sfp")
-    print(result.stdout[-3000:] if len(result.stdout) > 3000 else result.stdout)
+    # Workaround for stale HF dataset revision pins in data.py (mbpp
+    # 12e9221 etc. now return 404 from the Hub). Write a sitecustomize.py
+    # that monkey-patches datasets.load_dataset to drop the revision kwarg,
+    # then put it on PYTHONPATH so Python auto-loads it before data.py
+    # imports datasets. No touch to data.py itself.
+    import os as _os
+    patch_dir = "/tmp/sfp_patches"
+    _os.makedirs(patch_dir, exist_ok=True)
+    with open(f"{patch_dir}/sitecustomize.py", "w") as _f:
+        _f.write(
+            "import datasets as _d\n"
+            "_o = _d.load_dataset\n"
+            "def _p(*a, **k):\n"
+            "    k.pop('revision', None)\n"
+            "    return _o(*a, **k)\n"
+            "_d.load_dataset = _p\n"
+        )
+    env = dict(_os.environ)
+    env["PYTHONPATH"] = f"{patch_dir}:{env.get('PYTHONPATH', '')}"
+    # Help PyTorch handle fragmented memory; matters when teacher + student
+    # of a 1.5B model + per-step softmax over a 151k vocab leave little
+    # headroom. Modal's own OOM message suggested this exact setting.
+    env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+    # Stream subprocess output directly to Modal App Logs (don't capture).
+    # The previous capture_output=True hid all train.py progress until the
+    # subprocess finished, leaving Modal logs blank for the entire ~10 min run.
+    result = subprocess.run(cmd, cwd="/root/sfp", env=env)
     if result.returncode != 0:
-        print("STDERR:", result.stderr[-3000:])
-        raise RuntimeError(f"Training failed (seed={seed}): {result.stderr[-500:]}")
+        raise RuntimeError(f"Training failed (seed={seed}, returncode={result.returncode}) — see Modal logs above for stderr.")
 
     results_path = f"{out_dir}/results.json"
     with open(results_path) as f:

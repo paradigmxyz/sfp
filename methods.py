@@ -195,6 +195,123 @@ def orthogonal_loss(
 orthogonal_loss.SETUP = "orthogonal"
 
 
+def forgetting_curve_loss(
+    model,
+    batch: dict,
+    memory_batch: dict | None = None,
+    teacher=None,
+    temperature: float = 2.0,
+    alpha: float = 1.0,
+    beta: float = 0.5,
+    focus: float = 1.0,
+    **kw,
+) -> Tensor:
+    """DER++ + per-example forgetting-curve weighting on the distill term.
+
+    Replay CE on memory + dark-knowledge KL from a frozen task-boundary teacher,
+    with softmax-over-drift weights that concentrate preservation on memory
+    examples most at risk of being forgotten (spaced repetition / Ebbinghaus).
+    Submitted by lilaclilac09. ~35 lines.
+    """
+    out_new = model(
+        input_ids=batch["input_ids"],
+        attention_mask=batch["attention_mask"],
+        labels=batch["labels"],
+    )
+    loss = out_new.loss
+
+    if memory_batch is None:
+        return loss
+
+    mem_ids = memory_batch["input_ids"]
+    mem_mask = memory_batch["attention_mask"]
+
+    out_mem = model(input_ids=mem_ids, attention_mask=mem_mask, labels=memory_batch["labels"])
+    loss = loss + beta * out_mem.loss
+
+    if teacher is None:
+        return loss
+
+    with torch.no_grad():
+        t_logits = teacher(input_ids=mem_ids, attention_mask=mem_mask).logits
+
+    # Per-example KL, computed one batch index at a time to avoid holding
+    # multiple [B, S, V] tensors simultaneously. With Qwen2.5-1.5B (vocab
+    # ~151k) the naive expression t_p * (log t_p - s_logp) materialises
+    # ~5 [B,S,V] bf16 tensors at once (~3 GiB) which OOMs even on A10G with
+    # a teacher copy resident. Looping over batch costs 1/B the peak memory.
+    s_logits = out_mem.logits
+    B = s_logits.shape[0]
+    m = mem_mask.to(s_logits.dtype)
+    kl_ex_list = []
+    for i in range(B):
+        t_pi = F.softmax(t_logits[i] / temperature, dim=-1)
+        s_lpi = F.log_softmax(s_logits[i] / temperature, dim=-1)
+        kl_tok_i = (t_pi * (t_pi.clamp_min(1e-9).log() - s_lpi)).sum(-1)  # [S]
+        mi = m[i]
+        kl_ex_list.append((kl_tok_i * mi).sum() / mi.sum().clamp_min(1.0))
+        del t_pi, s_lpi, kl_tok_i
+    kl_ex = torch.stack(kl_ex_list)  # [B]
+
+    w = F.softmax(focus * kl_ex.detach(), dim=0)
+    distill = (w * kl_ex).sum() * (temperature ** 2)
+
+    return loss + alpha * distill
+
+forgetting_curve_loss.SETUP = "distill"
+
+
+def forgetting_curve_dist_loss(model, batch, memory_batch=None, teacher=None, **kw):
+    """forgetting_curve variant — alpha=2.0, beta=0.3. Doubles down on the
+    strongest single-mechanism baseline on the board (distill=0.6350 > replay=
+    0.5892), keeping the replay term light so plasticity isn't taxed.
+    """
+    return forgetting_curve_loss(
+        model, batch, memory_batch=memory_batch, teacher=teacher,
+        alpha=2.0, beta=0.3, **kw,
+    )
+
+forgetting_curve_dist_loss.SETUP = "distill"
+
+
+def forgetting_curve_replay_loss(model, batch, memory_batch=None, teacher=None, **kw):
+    """forgetting_curve variant — alpha=0.5, beta=1.0. Bet that hard-label
+    rehearsal carries retention more than softer distill on a 1.5B model.
+    """
+    return forgetting_curve_loss(
+        model, batch, memory_batch=memory_batch, teacher=teacher,
+        alpha=0.5, beta=1.0, **kw,
+    )
+
+forgetting_curve_replay_loss.SETUP = "distill"
+
+
+def forgetting_curve_sharp_loss(model, batch, memory_batch=None, teacher=None, **kw):
+    """forgetting_curve variant — focus=3.0. Sharpens the per-example forgetting
+    softmax so review concentrates harder on the most-drifted memory examples.
+    Leans into the unique mechanism nothing else on the board uses.
+    """
+    return forgetting_curve_loss(
+        model, batch, memory_batch=memory_batch, teacher=teacher,
+        focus=3.0, **kw,
+    )
+
+forgetting_curve_sharp_loss.SETUP = "distill"
+
+
+def forgetting_curve_soft_loss(model, batch, memory_batch=None, teacher=None, **kw):
+    """forgetting_curve variant — temperature=4.0. Softer distill target spreads
+    teacher knowledge across more classes per token; the T^2 scaling keeps the
+    distill term contribution roughly stable in magnitude.
+    """
+    return forgetting_curve_loss(
+        model, batch, memory_batch=memory_batch, teacher=teacher,
+        temperature=4.0, **kw,
+    )
+
+forgetting_curve_soft_loss.SETUP = "distill"
+
+
 # ---------------------------------------------------------------------------
 # SFP (our method)
 # ---------------------------------------------------------------------------
@@ -503,6 +620,17 @@ METHODS: dict[str, Callable] = {
     "distill": logit_distill_loss,
     "hidden_distill": hidden_distill_loss,
     "orthogonal": orthogonal_loss,
+    # Reordered after local PK data (iter 8 in ITERATION.md):
+    # forgetting_curve_replay (alpha=0.5, beta=1.0) wins the local proxy
+    # -0.6*math_loss - 0.4*code_loss on three independent runs (leaky-eval,
+    # held-out math-only, held-out both axes). Placed first so
+    # leaderboard.yml's `head -1` detector picks it as the primary auto-run.
+    # Other variants registered as alternatives for follow-up PRs.
+    "forgetting_curve_replay": forgetting_curve_replay_loss,
+    "forgetting_curve": forgetting_curve_loss,
+    "forgetting_curve_dist": forgetting_curve_dist_loss,
+    "forgetting_curve_sharp": forgetting_curve_sharp_loss,
+    "forgetting_curve_soft": forgetting_curve_soft_loss,
     "sfp": sfp_loss,
     "sfp_grad": sfp_grad_loss,
     "sfp_random_basis": sfp_random_basis_loss,
