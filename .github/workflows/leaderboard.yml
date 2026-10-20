@@ -24,7 +24,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Modal
-        run: pip install modal
+        run: python -m pip install --upgrade pip==26.2.2 && python -m pip install modal
 
       - name: Detect method name
         id: detect
